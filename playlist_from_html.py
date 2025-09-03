@@ -80,26 +80,33 @@ def extract_from_html_text(html_text: str) -> Tuple[str, List[str]]:
 # ====== Substack Support ======
 def fetch_substack_posts(archive_url: str, max_posts: int | None = None) -> list[str]:
     posts = []
-    r = requests.get(archive_url)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
+    page = 1
+    base = archive_url.split("/archive")[0]
 
-    for a in soup.select("a[href]"):
-        href = a["href"]
-        if "/p/" in href and "/comments" not in href:
-            if href.startswith("http"):
-                posts.append(href)
-            else:
-                base = archive_url.split("/archive")[0]
-                posts.append(base + href)
+    while True:
+        url = f"{archive_url}?page={page}"
+        r = requests.get(url)
+        if r.status_code != 200:
+            break
+        soup = BeautifulSoup(r.text, "html.parser")
+        found = 0
+        for a in soup.select("a[href]"):
+            href = a["href"]
+            if "/p/" in href and "/comments" not in href:
+                if href.startswith("http"):
+                    full_url = href
+                else:
+                    full_url = base + href
+                if full_url not in posts:
+                    posts.append(full_url)
+                    found += 1
+        if found == 0:
+            break
+        if max_posts and len(posts) >= max_posts:
+            return posts[:max_posts]
+        page += 1
 
-    seen, unique = set(), []
-    for p in posts:
-        if p not in seen:
-            seen.add(p)
-            unique.append(p)
-
-    return unique[:max_posts] if max_posts else unique
+    return posts[:max_posts] if max_posts else posts
 
 def fetch_post_html(url: str) -> str:
     r = requests.get(url)
@@ -153,8 +160,16 @@ def add_video_to_playlist(youtube, playlist_id: str, video_id: str, retries: int
             ).execute()
 
         except HttpError as e:
+            # Quota erschöpft
             if e.resp.status == 403 and "quotaExceeded" in str(e):
                 raise RuntimeError("❌ Quota exhausted (quotaExceeded). Bitte morgen erneut starten.")
+
+            # Unzulässiges Video → überspringen
+            if e.resp.status == 400 and "failedPrecondition" in str(e):
+                print(f"⚠️ Video {video_id} konnte nicht hinzugefügt werden (failedPrecondition), überspringe.")
+                return None
+
+            # Temporäre Fehler → Retry
             if e.resp.status in (409, 500, 502, 503, 504):
                 wait = base_sleep * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
                 print(f"⚠️ Fehler beim Hinzufügen {video_id} (Versuch {attempt}/{retries}): {e}")
@@ -184,8 +199,9 @@ def process_post(youtube, url: str, html_text: str, privacy: str, sleep: float, 
 
     try:
         for i, vid in enumerate(video_ids, 1):
-            add_video_to_playlist(youtube, playlist_id, vid)
-            print(f"✅ [{i}/{len(video_ids)}] hinzugefügt: {vid}")
+            res = add_video_to_playlist(youtube, playlist_id, vid)
+            if res is not None:
+                print(f"✅ [{i}/{len(video_ids)}] hinzugefügt: {vid}")
             time.sleep(sleep)
 
         print("Fertig:", f"https://www.youtube.com/playlist?list={playlist_id}")
