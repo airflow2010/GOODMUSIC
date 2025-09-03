@@ -77,17 +77,13 @@ def extract_from_html_text(html_text: str) -> Tuple[str, List[str]]:
     video_ids = extract_video_ids_from_html_text(html_text)
     return title, video_ids
 
-# ====== Substack Support (JSON API) ======
-def fetch_substack_posts_api(archive_url: str, limit_per_page: int = 50) -> list[dict]:
+# ====== Substack Support (robuste JSON-API) ======
+def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50) -> list[dict]:
     """
     Liefert alle Posts als Liste von Dicts: {"url": ..., "title": ...}
-    Nutzt das inoffizielle JSON-Archiv mit Offset/Limit.
+    Nutzt das JSON-Archiv mit Offset/Limit.
     """
-    m = re.match(r'(https?://[^/]+)', archive_url.strip())
-    if not m:
-        raise ValueError("Ungültige Substack-URL")
-    root = m.group(1)
-
+    root = archive_url.split("/archive")[0]
     posts = []
     offset = 0
     session = requests.Session()
@@ -95,28 +91,29 @@ def fetch_substack_posts_api(archive_url: str, limit_per_page: int = 50) -> list
     while True:
         params = {"sort": "new", "search": "", "offset": offset, "limit": limit_per_page}
         r = session.get(f"{root}/api/v1/archive", params=params, timeout=20)
-        if r.status_code != 200:
-            break
+        r.raise_for_status()
         data = r.json()
-        items = data if isinstance(data, list) else (data.get("posts") or data.get("items") or [])
+
+        if isinstance(data, dict):
+            items = data.get("posts", [])
+        elif isinstance(data, list):
+            items = data
+        else:
+            items = []
+
         if not items:
             break
 
         for it in items:
-            url = (
-                it.get("canonical_url")
-                or (f"{root}/p/{it['slug']}" if it.get("slug") else None)
-                or it.get("url")
-            )
+            url = it.get("canonical_url") or (f"{root}/p/{it['slug']}" if it.get("slug") else None)
             if not url:
                 continue
             if url.endswith("/comments"):
                 url = url[:-9]
-            title = htmllib.unescape((it.get("title") or it.get("headline") or "Neue Playlist").strip())
-            posts.append({"url": url, "title": title})
+            title = htmllib.unescape(it.get("title") or it.get("headline") or "Neue Playlist")
+            posts.append({"url": url, "title": title.strip()})
 
-        if len(items) < limit_per_page:
-            break
+        print(f"📥 Offset {offset}: {len(items)} Posts")
         offset += limit_per_page
         time.sleep(0.2)
 
@@ -175,17 +172,14 @@ def safe_add_video_to_playlist(youtube, playlist_id: str, video_id: str, max_ret
             ).execute()
         except HttpError as e:
             msg = str(e)
-            # Quota erschöpft
             if e.resp.status == 403 and "quotaExceeded" in msg:
                 raise RuntimeError("❌ Quota exhausted (quotaExceeded). Bitte morgen erneut starten.")
-            # Überspringbare Fehler
             if e.resp.status == 400 and "failedPrecondition" in msg:
                 print(f"⚠️ Video {video_id} übersprungen (failedPrecondition).")
                 return None
             if "duplicate" in msg or "conflict" in msg:
                 print(f"⚠️ Video {video_id} übersprungen (bereits vorhanden).")
                 return None
-            # Temporäre Fehler → Retry
             if e.resp.status in (409, 500, 502, 503, 504) or "SERVICE_UNAVAILABLE" in msg:
                 wait = backoff * (2 ** attempt) + random.uniform(0, 0.5)
                 print(f"⚠️ Fehler bei {video_id}, Retry {attempt+1}/{max_retries} in {wait:.1f}s …")
@@ -247,7 +241,7 @@ def main():
 
     if args.substack:
         print(f"📥 Hole Posts von: {args.substack}")
-        posts = fetch_substack_posts_api(args.substack)
+        posts = fetch_substack_posts_json(args.substack)
         if args.limit:
             posts = posts[:args.limit]
 
