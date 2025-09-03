@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import html
+import html as htmllib
 import os
 import pickle
 import re
@@ -44,14 +44,14 @@ def extract_title_from_html_text(html_text: str) -> str | None:
     if h1 and h1.get_text(strip=True):
         return h1.get_text(strip=True)
     m = re.search(r"<title>(.*?)</title>", html_text, flags=re.IGNORECASE | re.DOTALL)
-    return html.unescape(m.group(1)).strip() if m else None
+    return htmllib.unescape(m.group(1)).strip() if m else None
 
 def extract_video_ids_from_html_text(html_text: str) -> list[str]:
     ids_in_order: List[str] = []
     ids_in_order += re.findall(fr'id\s*=\s*"youtube2-({YOUTUBE_ID_RE})"', html_text)
 
     for m in re.finditer(r'data-attrs\s*=\s*"(.*?)"', html_text, flags=re.IGNORECASE | re.DOTALL):
-        unescaped = html.unescape(m.group(1))
+        unescaped = htmllib.unescape(m.group(1))
         mid = re.search(fr'"videoId"\s*:\s*"({YOUTUBE_ID_RE})"', unescaped)
         if mid:
             ids_in_order.append(mid.group(1))
@@ -77,36 +77,50 @@ def extract_from_html_text(html_text: str) -> Tuple[str, List[str]]:
     video_ids = extract_video_ids_from_html_text(html_text)
     return title, video_ids
 
-# ====== Substack Support ======
-def fetch_substack_posts(archive_url: str, max_posts: int | None = None) -> list[str]:
+# ====== Substack Support (JSON API) ======
+def fetch_substack_posts_api(archive_url: str, limit_per_page: int = 50) -> list[dict]:
+    """
+    Liefert alle Posts als Liste von Dicts: {"url": ..., "title": ...}
+    Nutzt das inoffizielle JSON-Archiv mit Offset/Limit.
+    """
+    m = re.match(r'(https?://[^/]+)', archive_url.strip())
+    if not m:
+        raise ValueError("Ungültige Substack-URL")
+    root = m.group(1)
+
     posts = []
-    page = 1
-    base = archive_url.split("/archive")[0]
+    offset = 0
+    session = requests.Session()
 
     while True:
-        url = f"{archive_url}?page={page}"
-        r = requests.get(url)
+        params = {"sort": "new", "search": "", "offset": offset, "limit": limit_per_page}
+        r = session.get(f"{root}/api/v1/archive", params=params, timeout=20)
         if r.status_code != 200:
             break
-        soup = BeautifulSoup(r.text, "html.parser")
-        found = 0
-        for a in soup.select("a[href]"):
-            href = a["href"]
-            if "/p/" in href and "/comments" not in href:
-                if href.startswith("http"):
-                    full_url = href
-                else:
-                    full_url = base + href
-                if full_url not in posts:
-                    posts.append(full_url)
-                    found += 1
-        if found == 0:
+        data = r.json()
+        items = data if isinstance(data, list) else (data.get("posts") or data.get("items") or [])
+        if not items:
             break
-        if max_posts and len(posts) >= max_posts:
-            return posts[:max_posts]
-        page += 1
 
-    return posts[:max_posts] if max_posts else posts
+        for it in items:
+            url = (
+                it.get("canonical_url")
+                or (f"{root}/p/{it['slug']}" if it.get("slug") else None)
+                or it.get("url")
+            )
+            if not url:
+                continue
+            if url.endswith("/comments"):
+                url = url[:-9]
+            title = htmllib.unescape((it.get("title") or it.get("headline") or "Neue Playlist").strip())
+            posts.append({"url": url, "title": title})
+
+        if len(items) < limit_per_page:
+            break
+        offset += limit_per_page
+        time.sleep(0.2)
+
+    return posts
 
 def fetch_post_html(url: str) -> str:
     r = requests.get(url)
@@ -151,38 +165,42 @@ def delete_playlist(youtube, playlist_id: str):
     except HttpError as e:
         print(f"⚠️ Konnte Playlist {playlist_id} nicht löschen: {e}")
 
-def add_video_to_playlist(youtube, playlist_id: str, video_id: str, retries: int = 5, base_sleep: float = 1.0):
-    for attempt in range(1, retries + 1):
+def safe_add_video_to_playlist(youtube, playlist_id: str, video_id: str, max_retries: int = 5):
+    backoff = 0.5
+    for attempt in range(max_retries):
         try:
             return youtube.playlistItems().insert(
                 part="snippet",
                 body={"snippet": {"playlistId": playlist_id, "resourceId": {"kind": "youtube#video", "videoId": video_id}}},
             ).execute()
-
         except HttpError as e:
+            msg = str(e)
             # Quota erschöpft
-            if e.resp.status == 403 and "quotaExceeded" in str(e):
+            if e.resp.status == 403 and "quotaExceeded" in msg:
                 raise RuntimeError("❌ Quota exhausted (quotaExceeded). Bitte morgen erneut starten.")
-
-            # Unzulässiges Video → überspringen
-            if e.resp.status == 400 and "failedPrecondition" in str(e):
-                print(f"⚠️ Video {video_id} konnte nicht hinzugefügt werden (failedPrecondition), überspringe.")
+            # Überspringbare Fehler
+            if e.resp.status == 400 and "failedPrecondition" in msg:
+                print(f"⚠️ Video {video_id} übersprungen (failedPrecondition).")
                 return None
-
+            if "duplicate" in msg or "conflict" in msg:
+                print(f"⚠️ Video {video_id} übersprungen (bereits vorhanden).")
+                return None
             # Temporäre Fehler → Retry
-            if e.resp.status in (409, 500, 502, 503, 504):
-                wait = base_sleep * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
-                print(f"⚠️ Fehler beim Hinzufügen {video_id} (Versuch {attempt}/{retries}): {e}")
-                print(f"   → Warte {wait:.1f}s und versuche erneut...")
+            if e.resp.status in (409, 500, 502, 503, 504) or "SERVICE_UNAVAILABLE" in msg:
+                wait = backoff * (2 ** attempt) + random.uniform(0, 0.5)
+                print(f"⚠️ Fehler bei {video_id}, Retry {attempt+1}/{max_retries} in {wait:.1f}s …")
                 time.sleep(wait)
                 continue
-            else:
-                raise
-    raise RuntimeError(f"❌ Konnte Video {video_id} nach {retries} Versuchen nicht hinzufügen.")
+            raise
+    print(f"❌ Video {video_id} nach {max_retries} Versuchen übersprungen.")
+    return None
 
 # ====== Workflow ======
-def process_post(youtube, url: str, html_text: str, privacy: str, sleep: float, progress: dict, index: int, total: int):
+def process_post(youtube, url: str, html_text: str, privacy: str, sleep: float, progress: dict,
+                 index: int, total: int, forced_title: str | None = None):
     title, video_ids = extract_from_html_text(html_text)
+    if forced_title:
+        title = forced_title
     if not video_ids:
         print(f"⚠️ Keine Videos in '{title}' gefunden.")
         return
@@ -199,13 +217,11 @@ def process_post(youtube, url: str, html_text: str, privacy: str, sleep: float, 
 
     try:
         for i, vid in enumerate(video_ids, 1):
-            res = add_video_to_playlist(youtube, playlist_id, vid)
+            res = safe_add_video_to_playlist(youtube, playlist_id, vid)
             if res is not None:
                 print(f"✅ [{i}/{len(video_ids)}] hinzugefügt: {vid}")
             time.sleep(sleep)
-
         print("Fertig:", f"https://www.youtube.com/playlist?list={playlist_id}")
-
     except RuntimeError as e:
         if "quotaExceeded" in str(e):
             delete_playlist(youtube, playlist_id)
@@ -217,7 +233,7 @@ def process_post(youtube, url: str, html_text: str, privacy: str, sleep: float, 
             raise
 
 def main():
-    parser = argparse.ArgumentParser(description="Erzeuge YouTube-Playlists aus HTML oder direkt von Substack.")
+    parser = argparse.ArgumentParser(description="Erzeuge YouTube-Playlists aus HTML oder Substack.")
     parser.add_argument("html_file", nargs="?", help="Pfad zu einer lokalen HTML-Datei")
     parser.add_argument("--substack", help="Substack-Archiv-URL (z. B. https://goodmusic.substack.com/archive)")
     parser.add_argument("--privacy", choices=("private", "unlisted", "public"), default=DEFAULT_PRIVACY)
@@ -231,23 +247,26 @@ def main():
 
     if args.substack:
         print(f"📥 Hole Posts von: {args.substack}")
-        posts = fetch_substack_posts(args.substack, max_posts=args.limit)
+        posts = fetch_substack_posts_api(args.substack)
+        if args.limit:
+            posts = posts[:args.limit]
 
         total = len(posts)
-        done = sum(1 for p in posts if p in progress["processed_playlists"])
+        done = sum(1 for p in posts if p["url"] in progress["processed_playlists"])
         open_ = total - done
         print(f"📊 Fortschritt: {done}/{total} verarbeitet ({open_} offen)")
 
-        for idx, url in enumerate(posts, 1):
-            print(f"\nLade Beitrag: {url}")
-            html_text = fetch_post_html(url)
+        for idx, post in enumerate(posts, 1):
+            print(f"\nLade Beitrag: {post['url']}")
+            html_text = fetch_post_html(post["url"])
             if args.dry_run:
                 title, vids = extract_from_html_text(html_text)
-                print(f"[Dry-run] {title} → {len(vids)} Videos")
+                print(f"[Dry-run] {post['title']} → {len(vids)} Videos")
                 for v in vids:
                     print("   ", v)
             else:
-                process_post(yt, url, html_text, args.privacy, args.sleep, progress, idx, total)
+                process_post(yt, post["url"], html_text, args.privacy, args.sleep,
+                             progress, idx, total, forced_title=post["title"])
 
     elif args.html_file:
         if not os.path.exists(args.html_file):
@@ -263,7 +282,8 @@ def main():
             for v in vids:
                 print("   ", v)
         else:
-            process_post(yt, args.html_file, html_text, args.privacy, args.sleep, progress, 1, 1)
+            process_post(yt, args.html_file, html_text, args.privacy, args.sleep,
+                         progress, 1, 1)
 
     else:
         parser.print_help()
