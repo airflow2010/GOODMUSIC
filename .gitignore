@@ -1,3 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 *.log
 client_secret.json
 progress.json
