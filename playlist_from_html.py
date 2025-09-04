@@ -78,45 +78,77 @@ def extract_from_html_text(html_text: str) -> Tuple[str, List[str]]:
     return title, video_ids
 
 # ====== Substack Support (robuste JSON-API) ======
-def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50) -> list[dict]:
+def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pages: int = 1000) -> list[dict]:
     """
-    Liefert alle Posts als Liste von Dicts: {"url": ..., "title": ...}
-    Nutzt das JSON-Archiv mit Offset/Limit.
+    Robust: holt alle Posts via /api/v1/archive mit Offset/Limit.
+    - offset wird um len(items) erhöht (nicht stur um limit_per_page).
+    - Duplikate werden entfernt.
     """
     root = archive_url.split("/archive")[0]
     posts = []
+    seen_urls = set()
     offset = 0
     session = requests.Session()
+    pages = 0
+    cumulative = 0
 
     while True:
+        if pages >= max_pages:
+            print(f"⚠️ Abbruch: max_pages ({max_pages}) erreicht.")
+            break
+
         params = {"sort": "new", "search": "", "offset": offset, "limit": limit_per_page}
         r = session.get(f"{root}/api/v1/archive", params=params, timeout=20)
-        r.raise_for_status()
-        data = r.json()
+        try:
+            r.raise_for_status()
+        except Exception as e:
+            print("❌ HTTP-Fehler beim Abruf:", e)
+            break
 
+        data = r.json()
         if isinstance(data, dict):
-            items = data.get("posts", [])
+            items = data.get("posts", []) or data.get("items", [])
         elif isinstance(data, list):
             items = data
         else:
             items = []
 
-        if not items:
+        n = len(items)
+        if n == 0:
+            print(f"⚠️ Keine Items bei offset={offset} → Ende.")
             break
 
+        new_count = 0
         for it in items:
-            url = it.get("canonical_url") or (f"{root}/p/{it['slug']}" if it.get("slug") else None)
+            url = it.get("canonical_url") or (f"{root}/p/{it['slug']}" if it.get("slug") else it.get("url"))
             if not url:
                 continue
+            # remove trailing /comments if any
             if url.endswith("/comments"):
                 url = url[:-9]
-            title = htmllib.unescape(it.get("title") or it.get("headline") or "Neue Playlist")
-            posts.append({"url": url, "title": title.strip()})
+            if url in seen_urls:
+                continue
+            title = htmllib.unescape((it.get("title") or it.get("headline") or "Neue Playlist").strip())
+            posts.append({"url": url, "title": title})
+            seen_urls.add(url)
+            new_count += 1
 
-        print(f"📥 Offset {offset}: {len(items)} Posts")
-        offset += limit_per_page
+        cumulative += new_count
+        pages += 1
+        print(f"📥 Offset {offset}: {n} Items (davon neu {new_count}) — kumulativ: {cumulative}")
+
+        # Schutz: wenn keine neuen Items in dieser Seite gefunden wurden, beenden
+        if new_count == 0:
+            print("⚠️ Keine neuen Einträge in dieser Seite (alle Duplikate) → Stop.")
+            break
+
+        # WICHTIG: offset um die tatsächliche Anzahl zurückgelieferter Items erhöhen
+        offset += n
+
+        # Kleiner Sleep, um nicht aggressiv zu fragen
         time.sleep(0.2)
 
+    print(f"\n✅ Gesamt eindeutige Posts: {len(posts)}")
     return posts
 
 def fetch_post_html(url: str) -> str:
