@@ -5,6 +5,12 @@ Es berücksichtigt die Limitierung des **YouTube Data API v3 Quotas** (10.000 Un
 
 ---
 
+## Ablaufdiagramm
+
+Das folgende Flowchart zeigt die Funktionsweise des Scripts:
+
+![Playlist Flowchart](playlist_flowchart.svg)
+
 ## 🚀 Setup
 
 1. **Repository / Script speichern**  
