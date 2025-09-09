@@ -16,6 +16,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 
 # ====== Konfiguration ======
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
@@ -159,22 +160,35 @@ def fetch_post_html(url: str) -> str:
 # ====== YouTube Auth ======
 def get_youtube_service():
     creds = None
+
+    # 1) Token laden, falls vorhanden
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, "rb") as token:
             creds = pickle.load(token)
+
+    # 2) Wenn ungültig oder fehlgeschlagen → neu authentifizieren
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+        try:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                raise RefreshError("Token invalid or expired", None)
+        except RefreshError:
+            print("⚠️ Token ungültig oder abgelaufen – starte neuen Login...")
+            if os.path.exists(TOKEN_FILE):
+                os.remove(TOKEN_FILE)
             if not os.path.exists(CLIENT_SECRETS_FILE):
-                print(f"Fehlend: {CLIENT_SECRETS_FILE}", file=sys.stderr)
+                print(f"❌ Fehlend: {CLIENT_SECRETS_FILE}", file=sys.stderr)
                 sys.exit(1)
             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
             creds = flow.run_local_server(port=8080)
+
+        # 3) Speichern
         with open(TOKEN_FILE, "wb") as token:
             pickle.dump(creds, token)
-    return build("youtube", "v3", credentials=creds)
 
+    # 4) YouTube Service zurückgeben
+    return build("youtube", "v3", credentials=creds)
 # ====== YouTube API Helpers ======
 def create_playlist(youtube, title: str, privacy: str = DEFAULT_PRIVACY) -> str:
     request = youtube.playlists().insert(
