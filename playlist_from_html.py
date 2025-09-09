@@ -191,10 +191,18 @@ def get_youtube_service():
     return build("youtube", "v3", credentials=creds)
 # ====== YouTube API Helpers ======
 def create_playlist(youtube, title: str, privacy: str = DEFAULT_PRIVACY) -> str:
+    # Titel auf 150 Zeichen kürzen
+    safe_title = title.strip().replace("\n", " ").replace("\r", " ")
+    if len(safe_title) > 149:
+        safe_title = safe_title[:146] + "..."
+
     request = youtube.playlists().insert(
         part="snippet,status",
         body={
-            "snippet": {"title": title, "description": "Automatisch erstellt aus Substack"},
+            "snippet": {
+                "title": safe_title,
+                "description": "Automatisch erstellt aus HTML-Datei",
+            },
             "status": {"privacyStatus": privacy},
         },
     )
