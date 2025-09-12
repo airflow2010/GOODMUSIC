@@ -231,18 +231,25 @@ def create_playlist(youtube, title: str, privacy: str = DEFAULT_PRIVACY) -> str:
     if len(safe_title) > 149:
         safe_title = safe_title[:146] + "..."
 
-    request = youtube.playlists().insert(
-        part="snippet,status",
-        body={
-            "snippet": {
-                "title": safe_title,
-                "description": "Automatisch erstellt aus HTML-Datei",
-            },
-            "status": {"privacyStatus": privacy},
+    body = {
+        "snippet": {
+            "title": safe_title,
+            "description": "Automatisch erstellt aus HTML-Datei",
         },
-    )
-    response = request.execute()
-    return response["id"]
+        "status": {"privacyStatus": privacy},
+    }
+
+    try:
+        request = youtube.playlists().insert(part="snippet,status", body=body)
+        response = request.execute()
+        return response["id"]
+    except HttpError as e:
+        msg = str(e)
+        # Quota erschöpft → sauberen Abbruch erzwingen
+        if e.resp.status == 403 and "quotaExceeded" in msg:
+            raise RuntimeError("❌ Quota exhausted (quotaExceeded). Bitte morgen erneut starten.")
+        # alle anderen Fehler normal hochreichen
+        raise
 
 def delete_playlist(youtube, playlist_id: str):
     try:
