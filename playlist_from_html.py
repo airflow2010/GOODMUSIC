@@ -152,10 +152,17 @@ def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pa
     print(f"\n✅ Gesamt eindeutige Posts: {len(posts)}")
     return posts
 
-def fetch_post_html(url: str) -> str:
-    r = requests.get(url)
-    r.raise_for_status()
-    return r.text
+def fetch_post_html(url: str, retries: int = 5, backoff: int = 30) -> str:
+    for attempt in range(retries):
+        r = requests.get(url, timeout=20)
+        if r.status_code == 429:  # Too Many Requests
+            wait = backoff * (2 ** attempt)  # Exponential Backoff
+            print(f"⚠️ 429 Too Many Requests – warte {wait}s und versuche erneut...")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r.text
+    raise Exception(f"❌ Abbruch: {url} konnte nach {retries} Versuchen nicht geladen werden")
 
 # ====== YouTube Auth ======
 def get_youtube_service():
