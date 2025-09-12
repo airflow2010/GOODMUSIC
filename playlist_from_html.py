@@ -152,17 +152,45 @@ def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pa
     print(f"\n✅ Gesamt eindeutige Posts: {len(posts)}")
     return posts
 
-def fetch_post_html(url: str, retries: int = 5, backoff: int = 30) -> str:
-    for attempt in range(retries):
-        r = requests.get(url, timeout=20)
-        if r.status_code == 429:  # Too Many Requests
-            wait = backoff * (2 ** attempt)  # Exponential Backoff
-            print(f"⚠️ 429 Too Many Requests – warte {wait}s und versuche erneut...")
+def fetch_post_html(url: str, max_retries: int = 5):
+    """
+    Holt den HTML-Content eines Substack-Posts mit Retry-Logik bei Rate-Limits (429)
+    und temporären Fehlern (5xx).
+    """
+    backoff = 1.0  # Startwert für Exponential Backoff in Sekunden
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, timeout=20)
+            r.raise_for_status()
+            return r.text
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code
+
+            # Substack Rate-Limit
+            if status == 429:
+                wait = backoff * (2 ** attempt) + random.uniform(0, 1.0)
+                print(f"⚠️ 429 Too Many Requests bei {url}, Retry {attempt+1}/{max_retries} in {wait:.1f}s …")
+                time.sleep(wait)
+                continue
+
+            # Temporäre Fehler (Server down)
+            if status in (500, 502, 503, 504):
+                wait = backoff * (2 ** attempt) + random.uniform(0, 1.0)
+                print(f"⚠️ HTTP {status} bei {url}, Retry {attempt+1}/{max_retries} in {wait:.1f}s …")
+                time.sleep(wait)
+                continue
+
+            # Alle anderen HTTP-Fehler → sofort hochwerfen
+            raise
+        except requests.exceptions.RequestException as e:
+            # Netzwerkprobleme (DNS, Timeout, Connection reset)
+            wait = backoff * (2 ** attempt) + random.uniform(0, 1.0)
+            print(f"⚠️ Netzwerkfehler bei {url}: {e}, Retry {attempt+1}/{max_retries} in {wait:.1f}s …")
             time.sleep(wait)
             continue
-        r.raise_for_status()
-        return r.text
-    raise Exception(f"❌ Abbruch: {url} konnte nach {retries} Versuchen nicht geladen werden")
+
+    # Nach max_retries aufgeben
+    raise RuntimeError(f"❌ Abbruch: {url} konnte nach {max_retries} Versuchen nicht geladen werden.")
 
 # ====== YouTube Auth ======
 def get_youtube_service():
