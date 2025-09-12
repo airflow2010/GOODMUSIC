@@ -229,24 +229,45 @@ def safe_add_video_to_playlist(youtube, playlist_id: str, video_id: str, max_ret
         try:
             return youtube.playlistItems().insert(
                 part="snippet",
-                body={"snippet": {"playlistId": playlist_id, "resourceId": {"kind": "youtube#video", "videoId": video_id}}},
+                body={
+                    "snippet": {
+                        "playlistId": playlist_id,
+                        "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                    }
+                },
             ).execute()
         except HttpError as e:
             msg = str(e)
+
+            # Quota exhausted
             if e.resp.status == 403 and "quotaExceeded" in msg:
                 raise RuntimeError("❌ Quota exhausted (quotaExceeded). Bitte morgen erneut starten.")
+
+            # Precondition failed
             if e.resp.status == 400 and "failedPrecondition" in msg:
                 print(f"⚠️ Video {video_id} übersprungen (failedPrecondition).")
                 return None
+
+            # Video nicht gefunden (neu!)
+            if e.resp.status == 404 and "videoNotFound" in msg:
+                print(f"⚠️ Video {video_id} übersprungen (videoNotFound).")
+                return None
+
+            # Bereits vorhanden
             if "duplicate" in msg or "conflict" in msg:
                 print(f"⚠️ Video {video_id} übersprungen (bereits vorhanden).")
                 return None
+
+            # Temporäre Fehler → Retry
             if e.resp.status in (409, 500, 502, 503, 504) or "SERVICE_UNAVAILABLE" in msg:
                 wait = backoff * (2 ** attempt) + random.uniform(0, 0.5)
                 print(f"⚠️ Fehler bei {video_id}, Retry {attempt+1}/{max_retries} in {wait:.1f}s …")
                 time.sleep(wait)
                 continue
+
+            # Alles andere → sofort durchreichen
             raise
+
     print(f"❌ Video {video_id} nach {max_retries} Versuchen übersprungen.")
     return None
 
