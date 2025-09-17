@@ -116,3 +116,45 @@ Optionen:
 - Script erstellt automatisch für jeden Substack-Post eine Playlist.  
 - Fortschritt bleibt erhalten, keine doppelten oder halbfertigen Playlists.  
 - Bricht automatisch ab, wenn Quota erschöpft ist.  
+
+
+
+
+
+## Fehler-Handling-Matrix für `playlist_from_html.py`
+
+### 🔹 1. Substack-Fehler
+
+| Fehlerart                            | Beispiel                                          | Reaktion des Scripts                                         |
+| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------ |
+| **429 Too Many Requests**            | `requests.exceptions.HTTPError: 429 Client Error` | Liest `Retry-After`-Header (oder nutzt Backoff), wartet entsprechend, versucht erneut (mehrfach). Erst nach `max_retries` → Abbruch. |
+| **Andere HTTP-Fehler (404, 500, …)** | Fehler beim Laden eines Beitrags                  | Bricht mit `RuntimeError` ab und meldet, welcher Post nicht geladen werden konnte. |
+
+---
+
+### 🔹 2. YouTube Playlist-Erstellung
+
+| Fehlerart                        | Beispiel                                                     | Reaktion des Scripts                                         |
+| -------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **quotaExceeded (403)**          | `"The request cannot be completed because you have exceeded your quota"` | Script bricht sofort ab (`RuntimeError`) und gibt Meldung: „❌ Quota exhausted. Bitte morgen erneut starten.“ |
+| **invalidPlaylistSnippet (400)** | `"Invalid playlist snippet"`                                 | Titel/Description unzulässig (z. B. zu lang). Script kürzt den Titel automatisch und setzt Standardbeschreibung. |
+
+---
+
+### 🔹 3. YouTube Video-Insert
+
+| Fehlerart                                                    | Beispiel                       | Reaktion des Scripts                                         |
+| ------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------ |
+| **quotaExceeded (403)**                                      | Beim Hinzufügen eines Videos   | Script bricht ab (siehe oben).                               |
+| **failedPrecondition (400)**                                 | `"Precondition check failed."` | Video wird **übersprungen**, Script läuft weiter.            |
+| **duplicate/conflict**                                       | `"Video already in playlist"`  | Video wird **übersprungen**, Script läuft weiter.            |
+| **videoNotFound (404)**                                      | `"Video not found."`           | Video wird **übersprungen**, Script läuft weiter.            |
+| **Service-Fehler (409, 500, 502, 503, 504, SERVICE_UNAVAILABLE)** | API-Fehler oder Ausfälle       | Automatisches Retry mit **exponentiellem Backoff + Zufallsanteil**, bis `max_retries` erreicht ist. Falls dauerhaft fehlschlägt → Video wird übersprungen. |
+
+---
+
+### 🔹 4. Authentifizierung
+
+| Fehlerart                         | Beispiel                                             | Reaktion des Scripts                                         |
+| --------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
+| **Token invalid/expired/revoked** | `google.auth.exceptions.RefreshError: invalid_grant` | Script löscht `token.pickle` und startet neuen OAuth-Flow (Browser öffnet sich). |
