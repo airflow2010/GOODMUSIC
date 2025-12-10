@@ -41,8 +41,26 @@ def rating_mode():
     if not db:
         return "Error: Firestore client not initialized.", 500
 
+    # Fetch all unique genres for the dropdown
+    try:
+        # Use .get() to fetch all documents at once. This can be more reliable
+        # for smaller collections than using a stream.
+        docs = db.collection(COLLECTION_NAME).get()
+        unique_genres = set()
+        for doc in docs:
+            if doc.exists:
+                data = doc.to_dict()
+                if data and (genre := data.get('genre')):
+                    unique_genres.add(genre)
+
+        unique_genres.discard("Unknown")
+        sorted_genres = sorted(list(unique_genres))
+    except Exception as e:
+        print(f"An error occurred while fetching genres: {e}")
+        sorted_genres = []
+
     # Query for unrated videos (where musical_value is 0)
-    query = db.collection(COLLECTION_NAME).where('musical_value', '==', 0).limit(20).stream()
+    query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("musical_value", "==", 0)).limit(20).stream()
     
     unrated_videos = [doc.to_dict() for doc in query]
 
@@ -52,7 +70,7 @@ def rating_mode():
     # Select a random video from the fetched list
     video = random.choice(unrated_videos)
 
-    return render_template('rating.html', video=video)
+    return render_template('rating.html', video=video, genres=sorted_genres)
 
 
 @app.route("/save_rating/<string:video_id>", methods=['POST'])
@@ -73,7 +91,7 @@ def save_rating(video_id):
             'genre': request.form.get('genre', 'Unknown'),
             'favorite': 'favorite' in request.form,
             'rejected': 'rejected' in request.form,
-            'last_updated': firestore.SERVER_TIMESTAMP
+            'date_rated': firestore.SERVER_TIMESTAMP
         }
 
         doc_ref.update(update_data)
