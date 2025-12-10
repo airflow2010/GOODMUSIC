@@ -104,6 +104,7 @@
         <h2>{{ video.title }}</h2>
 
         <!-- YouTube Player -->
+        <div id="player-error" style="display: none; color: red; margin-bottom: 15px;"></div>
         <div class="video-container">
             <div id="player"></div>
         </div>
@@ -187,8 +188,40 @@
             playerVars: {
                 'playsinline': 1,
                 'autoplay': 1
+            },
+            events: {
+                'onError': onPlayerError
             }
         });
+    }
+
+    function onPlayerError(event) {
+        const playerErrorEl = document.getElementById('player-error');
+        const code = event?.data;
+        const videoId = '{{ video.video_id if video else "" }}' || 'N/A';
+        let errorMessage = 'An unknown error occurred with the YouTube player.';
+
+        switch (code) {
+            case 2:
+                errorMessage = 'The video request contains an invalid parameter value.';
+                break;
+            case 5:
+                errorMessage = 'The requested content cannot be played in an HTML5 player or another HTML5 player error has occurred.';
+                break;
+            case 100:
+                errorMessage = 'The video requested was not found. This occurs when a video has been removed (for any reason) or has been marked as private.';
+                break;
+            case 101:
+            case 150:
+                errorMessage = 'The owner of the requested video does not allow it to be played in embedded players.';
+                break;
+        }
+
+        console.error('YouTube Player Error', { code: code, videoId: videoId, message: errorMessage, rawEvent: event });
+        if (playerErrorEl) {
+            playerErrorEl.style.display = 'block';
+            playerErrorEl.textContent = `YouTube Player Error (Code: ${code}): ${errorMessage} (Video ID: ${videoId})`;
+        }
     }
 
     // Script for sliders
