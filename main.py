@@ -100,34 +100,35 @@ def playing_mode():
 
     # --- Fetch and Filter Videos ---
     try:
-        # Base query
-        query = db.collection(COLLECTION_NAME)
-        
+        # Build a base query with filters that apply to both rated and unrated videos
+        base_query = db.collection(COLLECTION_NAME)
         if exclude_rejected:
-            query = query.where(filter=firestore.FieldFilter("rejected", "==", False))
-            
-        docs = query.stream()
-        all_videos = [doc.to_dict() for doc in docs]
+            base_query = base_query.where(filter=firestore.FieldFilter("rejected", "==", False))
+        if genre_filter != 'All':
+            base_query = base_query.where(filter=firestore.FieldFilter("genre", "==", genre_filter))
+        if favorite_only:
+            base_query = base_query.where(filter=firestore.FieldFilter("favorite", "==", True))
 
-        # Apply filters in Python
-        filtered_videos = []
-        for v in all_videos:
-            if genre_filter != 'All' and v.get('genre') != genre_filter:
-                continue
-            if favorite_only and not v.get('favorite'):
-                continue
-            
-            musical_val = v.get('musical_value', 0)
-            video_val = v.get('video_value', 0)
-            is_unrated = (musical_val == 0)
-            
-            if is_unrated:
-                if not include_unrated:
-                    continue
-            elif musical_val < min_musical_value or video_val < min_video_value:
-                continue
-                
-            filtered_videos.append(v)
+        candidate_videos = []
+
+        # --- Query 1: Get RATED videos that meet the criteria ---
+        # This query uses multiple range filters (>=), which requires a composite index.
+        rated_query = base_query.where(
+            filter=firestore.FieldFilter("musical_value", ">=", min_musical_value)
+        ).where(
+            filter=firestore.FieldFilter("video_value", ">=", min_video_value)
+        )
+        rated_docs = rated_query.stream()
+        candidate_videos.extend([doc.to_dict() for doc in rated_docs])
+
+        # --- Query 2: Get UNRATED videos, if requested ---
+        if include_unrated:
+            unrated_query = base_query.where(filter=firestore.FieldFilter("musical_value", "==", 0))
+            unrated_docs = unrated_query.stream()
+            candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
+
+        filtered_videos = candidate_videos
+
     except Exception as e:
         print(f"An error occurred while fetching/filtering videos: {e}")
         filtered_videos = []
