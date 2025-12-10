@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Video Rating</title>
+    <style>
+        body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; margin: 20px; }
+        .container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; }
+        .video-container { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin-bottom: 20px; }
+        .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        h1, h2 { color: #ffffff; }
+        form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="text"], input[type="number"], select {
+            width: 100%; padding: 8px; box-sizing: border-box; background-color: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px;
+        }
+        .checkbox-group { display: flex; align-items: center; gap: 10px; }
+        .button-group { grid-column: 1 / -1; display: flex; justify-content: space-between; margin-top: 20px; }
+        button, .button-link {
+            padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; text-align: center;
+        }
+        .save-button { background-color: #4CAF50; color: white; }
+        .next-button { background-color: #008CBA; color: white; }
+        .info { margin-top: 20px; background-color: #2a2a2a; padding: 15px; border-radius: 4px; }
+        .info p { margin: 5px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    {% if video %}
+        <h1>Rate Music Video</h1>
+        <h2>{{ video.title }}</h2>
+
+        <!-- YouTube Player -->
+        <div class="video-container">
+            <div id="player"></div>
+        </div>
+
+        <form action="{{ url_for('save_rating', video_id=video.video_id) }}" method="post">
+            <!-- Ratings -->
+            <div>
+                <label for="musical_value">Musical Value (1-10):</label>
+                <input type="number" id="musical_value" name="musical_value" min="1" max="10" required>
+            </div>
+            <div>
+                <label for="video_value">Video Value (1-10):</label>
+                <input type="number" id="video_value" name="video_value" min="1" max="10" required>
+            </div>
+
+            <!-- Genre -->
+            <div>
+                <label for="genre">Genre:</label>
+                <input type="text" id="genre" name="genre" value="{{ video.genre }}">
+            </div>
+
+            <!-- Booleans -->
+            <div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="favorite" name="favorite">
+                    <label for="favorite">Favorite</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="rejected" name="rejected">
+                    <label for="rejected">Rejected</label>
+                </div>
+            </div>
+
+            <!-- Buttons -->
+            <div class="button-group">
+                <button type="submit" class="save-button">Save & Next</button>
+                <a href="{{ url_for('rating_mode') }}" class="button-link next-button">Skip & Next</a>
+            </div>
+        </form>
+
+        <div class="info">
+            <p><strong>Source:</strong> <a href="{{ video.source }}" target="_blank">{{ video.source }}</a></p>
+            <p><strong>Video ID:</strong> {{ video.video_id }}</p>
+        </div>
+
+    {% else %}
+        <h1>No unrated videos found!</h1>
+        <p>Run the scraping script to add more videos to the database.</p>
+    {% endif %}
+</div>
+
+<script>
+    // Load the IFrame Player API code asynchronously.
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    var firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+    var player;
+    function onYouTubeIframeAPIReady() {
+        player = new YT.Player('player', {
+            height: '390',
+            width: '640',
+            videoId: '{{ video.video_id if video else "" }}',
+            playerVars: {
+                'playsinline': 1
+            }
+        });
+    }
+</script>
+
+</body>
+</html>
