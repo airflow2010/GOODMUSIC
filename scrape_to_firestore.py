@@ -91,9 +91,11 @@ def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pa
     offset = 0
     session = requests.Session()
     pages = 0
+    cumulative = 0
 
     while True:
         if pages >= max_pages:
+            print(f"⚠️ Stopping: max_pages ({max_pages}) reached.")
             break
 
         params = {"sort": "new", "search": "", "offset": offset, "limit": limit_per_page}
@@ -112,7 +114,9 @@ def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pa
         else:
             items = []
 
-        if not items:
+        n = len(items)
+        if n == 0:
+            print(f"⚠️ No items at offset={offset} → End.")
             break
 
         new_count = 0
@@ -135,15 +139,18 @@ def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pa
             seen_urls.add(url)
             new_count += 1
 
+        cumulative += new_count
         pages += 1
-        print(f"📥 Offset {offset}: {len(items)} Items (new: {new_count})")
+        print(f"📥 Offset {offset}: {n} Items (new: {new_count}) — cumulative: {cumulative}")
         
         if new_count == 0:
+            print("⚠️ No new items in this page (all duplicates) → Stop.")
             break
 
-        offset += len(items)
+        offset += n
         time.sleep(0.2)
 
+    print(f"\n✅ Total unique posts: {len(posts)}")
     return posts
 
 def fetch_post_html(url: str) -> str:
@@ -223,20 +230,27 @@ def extract_substack_date_from_html(html_text: str) -> datetime | None:
     return None
 
 
-def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None]:
+def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | None:
     """Fetches video title and upload date from YouTube API to help Gemini."""
     if not youtube:
         return "", None
     try:
         response = youtube.videos().list(
-            part="snippet",
+            part="snippet,status",
             id=video_id
         ).execute()
         if "items" in response and len(response["items"]) > 0:
-            snippet = response["items"][0].get("snippet", {})
+            item = response["items"][0]
+            status = item.get("status", {})
+            if status.get("privacyStatus") == "private":
+                return None
+
+            snippet = item.get("snippet", {})
             title = snippet.get("title", "")
             uploaded_at = parse_datetime(snippet.get("publishedAt"))
             return title, uploaded_at
+        else:
+            return None
     except Exception as e:
         print(f"⚠️ YouTube API Error for {video_id}: {e}")
     return "", None
@@ -286,7 +300,11 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         print(f"   Processing new video: {video_id}")
         
         # 1. Get Title (optional but helpful for AI)
-        title, date_youtube = get_video_metadata(youtube, video_id)
+        metadata = get_video_metadata(youtube, video_id)
+        if metadata is None:
+            print(f"   ⚠️ Video {video_id} is private or unavailable. Skipping.")
+            continue
+        title, date_youtube = metadata
         
         # 2. Predict Genre
         genre = predict_genre(model, video_id, title)
@@ -317,7 +335,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scrape music videos to Firestore.")
     parser.add_argument("--substack", default="https://goodmusic.substack.com/archive", help="Substack Archive URL")
     parser.add_argument("--project", help="Google Cloud Project ID")
-    parser.add_argument("--limit", type=int, default=5, help="Limit posts to process (0 for all)")
+    parser.add_argument("--limit", type=int, default=0, help="Limit posts to process (0 for all)")
     args = parser.parse_args()
 
     # 1. Auth & Clients
