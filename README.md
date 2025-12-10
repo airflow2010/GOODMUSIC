@@ -1,160 +1,105 @@
-# 🎶 YouTube Playlist Builder für Substack
+# PRISM GoodMusic Toolkit
 
-Dieses Python-Script erstellt automatisch **YouTube-Playlists** aus Substack-Beiträgen, die eingebettete YouTube-Videos enthalten.  
-Es berücksichtigt die Limitierung des **YouTube Data API v3 Quotas** (10.000 Units pro Tag, 50 Units pro Video-Insert).
+Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, creating YouTube playlists, and rating/filtering videos via a small Flask UI.
 
----
+## Concept
+- Scrape Substack posts, extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection).
+- Optionally let Vertex AI guess the genre.
+- Build YouTube playlists automatically from Substack archives or local HTML.
+- Rate and filter the catalog in a browser (play mode for discovery, rate mode for unrated items).
 
-## Ablaufdiagramm
+## Repository layout
+- `prism-gui.py` — Flask app that renders the rating (`/rate`) and play (`/play`) pages using Firestore data.
+- `scrape_to_firestore.py` — Scrapes Substack posts, pulls YouTube metadata, predicts genres (Vertex AI), and writes new videos to Firestore.
+- `scrape_to_YT-playlists.py` — Creates YouTube playlists from Substack archives or local HTML; tracks progress in `progress.json`. This script is deprecated and only included for historical reasons.
+- `templates/` — HTML templates for the Flask UI.
+- `requirements.txt` — Python dependencies.
 
-Das folgende Flowchart zeigt die Funktionsweise des Scripts:
+## Prerequisites
+- Python 3.10+ and `pip`.
+- A Google Cloud project with these APIs enabled: Cloud Firestore, Vertex AI (optional for genre prediction), YouTube Data API v3.
+- Firestore in Native mode with a collection named `musicvideos` (created automatically when seeding).
+- Google Cloud SDK (`gcloud`) installed for local Application Default Credentials.
+- YouTube OAuth 2.0 Client ID JSON (desktop type) downloaded as `client_secret.json` in the project root.
 
-![Playlist Flowchart](playlist_flowchart.svg)
-
-## 🚀 Setup
-
-1. **Repository / Script speichern**  
-   Lege `playlist_from_html.py` in einen Projektordner, z. B.  
-   ```
-   ~/Documents/python-projekte/GOODMUSIC
-   ```
-
-2. **Virtuelle Umgebung erstellen**  
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-3. **Abhängigkeiten installieren**  
-   ```bash
-   pip install google-api-python-client google-auth google-auth-oauthlib requests beautifulsoup4
-   ```
-
-4. **OAuth-Credentials von Google Cloud Console**  
-   - OAuth 2.0 Client anlegen (Typ „Webanwendung“).  
-   - Redirect-URI hinzufügen: `http://localhost:8080/`  
-   - JSON-Datei herunterladen und als `client_secret.json` im Projektordner ablegen.  
-
----
-
-## ▶️ Nutzung
-
-### 1. Lokale HTML-Datei verarbeiten
+## Setup
 ```bash
-python playlist_from_html.py videos.html
+git clone <this-repo>
+cd GOODMUSIC
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
-- Erstellt eine Playlist aus den YouTube-Videos in `videos.html`.  
-- Playlist-Name = Titel der Seite (`<title>` oder Substack-Titel).  
 
----
+### Authenticate
+- Google Cloud (Firestore/Vertex): `gcloud auth application-default login`
+- YouTube Data API: first run of the playlist or scrape scripts opens a browser OAuth flow; `token.pickle` will be written next to the scripts.
+- Set your project ID for the UI (and for scraping if you want to override ADC):
+  ```bash
+  export GCP_PROJECT=<your-project-id>
+  ```
 
-### 2. Direktes Auslesen von Substack-Archiven
+### Required files
+- `client_secret.json` — OAuth client for YouTube Data API v3 (Desktop app).
+- `progress.json` — Created automatically to avoid duplicate playlist creation.
+
+## Data model (Firestore `musicvideos`)
+Each document key is the YouTube `video_id` and stores fields like:
+- `title`, `source` (Substack URL), `genre`, `musical_value`, `video_value`
+- `favorite` (bool), `rejected` (bool)
+- `date_prism`, `date_substack`, `date_youtube`, `date_rated`
+
+## Scripts
+
+### 1) Scrape Substack to Firestore
+`scrape_to_firestore.py` fetches posts, extracts video IDs, fetches YouTube metadata, lets Vertex AI guess genre, and writes new docs.
 ```bash
-python playlist_from_html.py --substack https://goodmusic.substack.com/archive
+python scrape_to_firestore.py --substack https://goodmusic.substack.com/archive \
+  --project <your-project-id> \
+  --limit 50     # optional
 ```
-- Ruft alle Beiträge aus dem Substack-Archiv ab.  
-- Erstellt für jeden Beitrag eine Playlist.  
+Notes:
+- Uses ADC (`gcloud auth application-default login`) and `GCP_PROJECT`/`--project`.
+- Needs `client_secret.json` for YouTube metadata; falls back gracefully if missing.
+- Vertex AI genre prediction is optional; if unavailable, genre defaults to `Unknown`.
 
-Optionen:
-- `--limit 3` → nur die letzten 3 Beiträge verarbeiten.  
-- `--privacy public|unlisted|private` → Sichtbarkeit der Playlists.  
-- `--sleep 0.5` → Pause zwischen API-Calls (Standard: 0.2s).  
-- `--dry-run` → nur analysieren, nichts in YouTube anlegen.  
+### 1b) Build YouTube playlists (deprecated)
+`scrape_to_YT-playlists.py` creates playlists from Substack or a local HTML file; remembers processed posts in `progress.json`.
+```bash
+# From Substack archive
+python scrape_to_YT-playlists.py --substack https://goodmusic.substack.com/archive \
+  --privacy private --limit 10 --sleep 0.2
 
----
+# From local HTML
+python scrape_to_YT-playlists.py path/to/file.html --privacy unlisted
+```
+Flags:
+- `--privacy private|unlisted|public`
+- `--dry-run` to inspect without creating playlists
+- `--limit` to cap posts/videos
+- `--sleep` to throttle API calls
+Auth:
+- Requires `client_secret.json`; first run writes `token.pickle`.
+- Enable YouTube Data API v3 in your project.
 
-## 🛡️ Quota-Handling
+### 2) Run the Flask UI
+`prism-gui.py` serves:
+- `/rate` — shows unrated videos (`musical_value == 0`) to rate.
+- `/play` — lets you filter (genre, min ratings, favorites, unrated inclusion, rejected exclusion) and play/rate.
+```bash
+export GCP_PROJECT=<your-project-id>
+python prism-gui.py
+# open http://127.0.0.1:8080
+```
+For production you can run `gunicorn prism-gui:app`.
 
-- Jede Playlist-Erstellung + Video-Insert kostet API-Quota.  
-- Sobald das Tageslimit erreicht ist, meldet die API: **`quotaExceeded` (403)**.  
-- Script erkennt das, löscht unfertige Playlist und bricht sauber ab mit Hinweis:  
-  ```
-  ❌ Quota exhausted (quotaExceeded). Bitte morgen erneut starten.
-  ```
+## Operational tips
+- Quotas: YouTube inserts and playlist creation consume quota; the playlist script stops and cleans up on `quotaExceeded`.
+- Progress: `progress.json` prevents duplicate playlists; delete it if you want to rebuild everything.
+- Tokens: remove `token.pickle` to force a new YouTube OAuth flow.
+- Firestore indexes: filtering in the UI may require composite indexes if you add more complex queries; current filters use simple field filters.
 
----
-
-## 💾 Fortschrittsdatei
-
-- Fortschritt wird in `progress.json` gespeichert:  
-  ```json
-  {
-    "processed_playlists": {
-      "https://goodmusic.substack.com/p/goodmusic-8425": "PLxxxxxx",
-      "https://goodmusic.substack.com/p/goodmusic-8325": "PLyyyyyy"
-    }
-  }
-  ```
-- **Vorteile:**
-  - Keine doppelten Playlists.  
-  - Script überspringt bereits verarbeitete Beiträge.  
-  - Bei Quota-Abbruch wird die unfertige Playlist gelöscht und beim nächsten Lauf neu erstellt.  
-
----
-
-## 📅 Workflow (empfohlen)
-
-1. Virtuelle Umgebung aktivieren:  
-   ```bash
-   cd ~/Documents/python-projekte/GOODMUSIC
-   source venv/bin/activate
-   ```
-
-2. Script starten:  
-   ```bash
-   python playlist_from_html.py --substack https://goodmusic.substack.com/archive
-   ```
-
-3. Script läuft, bis Quota erschöpft oder Archiv fertig.  
-4. Am nächsten Tag wieder starten – Script macht dort weiter, wo es aufgehört hat.  
-
----
-
-## ✅ Zusammenfassung
-
-- Einmal einrichten → täglich starten.  
-- Script erstellt automatisch für jeden Substack-Post eine Playlist.  
-- Fortschritt bleibt erhalten, keine doppelten oder halbfertigen Playlists.  
-- Bricht automatisch ab, wenn Quota erschöpft ist.  
-
-
-
-
-
-## Fehler-Handling-Matrix für `playlist_from_html.py`
-
-### 🔹 1. Substack-Fehler
-
-| Fehlerart                            | Beispiel                                          | Reaktion des Scripts                                         |
-| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------ |
-| **429 Too Many Requests**            | `requests.exceptions.HTTPError: 429 Client Error` | Liest `Retry-After`-Header (oder nutzt Backoff), wartet entsprechend, versucht erneut (mehrfach). Erst nach `max_retries` → Abbruch. |
-| **Andere HTTP-Fehler (404, 500, …)** | Fehler beim Laden eines Beitrags                  | Bricht mit `RuntimeError` ab und meldet, welcher Post nicht geladen werden konnte. |
-
----
-
-### 🔹 2. YouTube Playlist-Erstellung
-
-| Fehlerart                        | Beispiel                                                     | Reaktion des Scripts                                         |
-| -------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| **quotaExceeded (403)**          | `"The request cannot be completed because you have exceeded your quota"` | Script bricht sofort ab (`RuntimeError`) und gibt Meldung: „❌ Quota exhausted. Bitte morgen erneut starten.“ |
-| **invalidPlaylistSnippet (400)** | `"Invalid playlist snippet"`                                 | Titel/Description unzulässig (z. B. zu lang). Script kürzt den Titel automatisch und setzt Standardbeschreibung. |
-
----
-
-### 🔹 3. YouTube Video-Insert
-
-| Fehlerart                                                    | Beispiel                       | Reaktion des Scripts                                         |
-| ------------------------------------------------------------ | ------------------------------ | ------------------------------------------------------------ |
-| **quotaExceeded (403)**                                      | Beim Hinzufügen eines Videos   | Script bricht ab (siehe oben).                               |
-| **failedPrecondition (400)**                                 | `"Precondition check failed."` | Video wird **übersprungen**, Script läuft weiter.            |
-| **duplicate/conflict**                                       | `"Video already in playlist"`  | Video wird **übersprungen**, Script läuft weiter.            |
-| **videoNotFound (404)**                                      | `"Video not found."`           | Video wird **übersprungen**, Script läuft weiter.            |
-| **Service-Fehler (409, 500, 502, 503, 504, SERVICE_UNAVAILABLE)** | API-Fehler oder Ausfälle       | Automatisches Retry mit **exponentiellem Backoff + Zufallsanteil**, bis `max_retries` erreicht ist. Falls dauerhaft fehlschlägt → Video wird übersprungen. |
-
----
-
-### 🔹 4. Authentifizierung
-
-| Fehlerart                         | Beispiel                                             | Reaktion des Scripts                                         |
-| --------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
-| **Token invalid/expired/revoked** | `google.auth.exceptions.RefreshError: invalid_grant` | Script löscht `token.pickle` und startet neuen OAuth-Flow (Browser öffnet sich). |
+## Troubleshooting
+- “Video unavailable” in the UI: check the console for YouTube player errors; embedding may be blocked or the video ID malformed.
+- Firestore permission errors: ensure the Firestore API is enabled and ADC credentials belong to a project with database access.
+- Vertex AI errors: the scraper will continue; genres become `Unknown`.
