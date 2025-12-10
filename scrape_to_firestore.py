@@ -6,6 +6,7 @@ import re
 import time
 import pickle
 import sys
+from datetime import datetime, timezone
 from typing import List, Tuple
 
 import requests
@@ -124,7 +125,13 @@ def fetch_substack_posts_json(archive_url: str, limit_per_page: int = 50, max_pa
             if url in seen_urls:
                 continue
             title = htmllib.unescape((it.get("title") or it.get("headline") or "Neue Playlist").strip())
-            posts.append({"url": url, "title": title})
+            published_at = (
+                it.get("post_date")
+                or it.get("published_at")
+                or it.get("created_at")
+                or it.get("date")
+            )
+            posts.append({"url": url, "title": title, "published_at": published_at})
             seen_urls.add(url)
             new_count += 1
 
@@ -186,20 +193,53 @@ def get_youtube_service():
 
 # ====== AI & Database Logic ======
 
-def get_video_title(youtube, video_id: str) -> str:
-    """Fetches video title from YouTube API to help Gemini."""
+def parse_datetime(value: str | None) -> datetime | None:
+    """Parse various ISO-ish date strings into timezone-aware datetimes."""
+    if not value:
+        return None
+    try:
+        clean = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean)
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def extract_substack_date_from_html(html_text: str) -> datetime | None:
+    """Extract publish date from Substack HTML if present."""
+    soup = BeautifulSoup(html_text, "html.parser")
+    meta = soup.find("meta", attrs={"property": "article:published_time"})
+    if meta and meta.get("content"):
+        dt = parse_datetime(meta["content"])
+        if dt:
+            return dt
+    time_tag = soup.find("time")
+    if time_tag and time_tag.get("datetime"):
+        dt = parse_datetime(time_tag["datetime"])
+        if dt:
+            return dt
+    return None
+
+
+def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None]:
+    """Fetches video title and upload date from YouTube API to help Gemini."""
     if not youtube:
-        return ""
+        return "", None
     try:
         response = youtube.videos().list(
             part="snippet",
             id=video_id
         ).execute()
         if "items" in response and len(response["items"]) > 0:
-            return response["items"][0]["snippet"]["title"]
+            snippet = response["items"][0].get("snippet", {})
+            title = snippet.get("title", "")
+            uploaded_at = parse_datetime(snippet.get("publishedAt"))
+            return title, uploaded_at
     except Exception as e:
         print(f"⚠️ YouTube API Error for {video_id}: {e}")
-    return ""
+    return "", None
 
 def predict_genre(model, video_id: str, video_title: str) -> str:
     """Uses Gemini to predict genre based on ID and Title."""
@@ -218,10 +258,14 @@ def predict_genre(model, video_id: str, video_title: str) -> str:
         print(f"⚠️ Gemini Error: {e}")
         return "Unknown"
 
-def process_post_to_firestore(db, model, youtube, post_url: str, html_text: str):
+def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
     _, video_ids = extract_from_html_text(html_text)
     if not video_ids:
         return
+    
+    post_url = post["url"]
+    # Prefer archive JSON date, fall back to HTML meta
+    date_substack = parse_datetime(post.get("published_at")) or extract_substack_date_from_html(html_text)
 
     print(f"   Found {len(video_ids)} videos in post.")
     
@@ -238,11 +282,11 @@ def process_post_to_firestore(db, model, youtube, post_url: str, html_text: str)
 
         if doc.exists:
             continue
-            
+        
         print(f"   Processing new video: {video_id}")
         
         # 1. Get Title (optional but helpful for AI)
-        title = get_video_title(youtube, video_id)
+        title, date_youtube = get_video_metadata(youtube, video_id)
         
         # 2. Predict Genre
         genre = predict_genre(model, video_id, title)
@@ -257,7 +301,10 @@ def process_post_to_firestore(db, model, youtube, post_url: str, html_text: str)
             "favorite": False,
             "rejected": False,
             "title": title,
-            "created_at": firestore.SERVER_TIMESTAMP
+            "date_prism": firestore.SERVER_TIMESTAMP,
+            "date_youtube": date_youtube,
+            "date_substack": date_substack,
+            "date_rated": None
         }
         
         # 4. Save
@@ -313,7 +360,7 @@ def main():
     for i, post in enumerate(posts):
         print(f"[{i+1}/{len(posts)}] Processing {post['title']}...")
         html_text = fetch_post_html(post["url"])
-        process_post_to_firestore(db, model, youtube, post["url"], html_text)
+        process_post_to_firestore(db, model, youtube, post, html_text)
 
 if __name__ == "__main__":
     main()
