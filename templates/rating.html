@@ -18,7 +18,7 @@
         .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
         .checkbox-group label { cursor: pointer; }
         .checkbox-group input[type="checkbox"] { transform: scale(1.5); margin-right: 5px; }
-        .button-group { grid-column: 1 / -1; display: flex; justify-content: space-between; margin-top: 20px; }
+        .button-group { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
         button, .button-link {
             padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; text-align: center;
         }
@@ -54,11 +54,16 @@
 <body>
 
 <div class="container">
-    <div class="logo-wrap">
-        <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div class="logo-wrap" style="margin-bottom: 0;">
+            <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+        </div>
+        <select onchange="window.location.href=this.value" style="font-size: 1.5em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
+            <option value="{{ url_for('rating_mode') }}" selected>Rate Music Video</option>
+            <option value="{{ url_for('playing_mode') }}">Play Music Video</option>
+        </select>
     </div>
     {% if video %}
-        <h1>Rate Music Video</h1>
         <h2>{{ video.title }}</h2>
 
         <!-- YouTube Player -->

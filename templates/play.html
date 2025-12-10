@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playing Mode</title>
+    <style>
+        body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; margin: 20px; }
+        .container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; }
+        .video-container { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin-bottom: 20px; }
+        .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        h1, h2, h3 { color: #ffffff; }
+        form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .filter-form { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 20px; grid-template-columns: none; }
+        .filter-form > div { flex: 1 1 150px; }
+        .filter-form label { font-size: 0.9em; }
+        .filter-form .button-group { grid-column: auto; }
+        label { display: block; margin-bottom: 5px; font-size: 1.1em; }
+        input[type="text"], input[type="number"], select {
+            width: 100%; padding: 8px; box-sizing: border-box; background-color: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px;
+        }
+        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .checkbox-group label { cursor: pointer; }
+        .checkbox-group input[type="checkbox"] { transform: scale(1.5); margin-right: 5px; }
+        .button-group { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+        button, .button-link {
+            padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; text-align: center;
+        }
+        .save-button { background-color: #4CAF50; color: white; }
+        .next-button { background-color: #008CBA; color: white; }
+        .info { margin-top: 20px; background-color: #2a2a2a; padding: 15px; border-radius: 4px; }
+        .info p { margin: 5px 0; }
+        .info a { color: #bbbbbb; text-decoration: none; }
+        .info a:hover { text-decoration: underline; }
+        .slider-container { display: flex; flex-direction: column; gap: 5px; }
+        input[type="range"] { -webkit-appearance: none; width: 100%; height: 10px; background: #555; outline: none; opacity: 0.7; -webkit-transition: .2s; transition: opacity .2s; border-radius: 5px; }
+        input[type="range"]:hover { opacity: 1; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #4CAF50; cursor: pointer; border-radius: 50%; }
+        input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; background: #4CAF50; cursor: pointer; border-radius: 50%; }
+        .logo-wrap { display: flex; align-items: center; justify-content: flex-start; margin-bottom: 20px; }
+        .logo { max-width: 200px; height: auto; mix-blend-mode: screen; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div class="logo-wrap" style="margin-bottom: 0;">
+            <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+        </div>
+        <select onchange="window.location.href=this.value" style="font-size: 1.5em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
+            <option value="{{ url_for('rating_mode') }}">Rate Music Video</option>
+            <option value="{{ url_for('playing_mode') }}" selected>Play Music Video</option>
+        </select>
+    </div>
+
+    <!-- Filter Form -->
+    <form class="filter-form" action="{{ url_for('playing_mode') }}" method="post">
+        <h3>Filters</h3>
+        <div>
+            <label for="genre_filter">Genre:</label>
+            <select id="genre_filter" name="genre_filter">
+                <option value="All" {% if filters.genre_filter == 'All' %}selected{% endif %}>All Genres</option>
+                {% for g in genres %}
+                    <option value="{{ g }}" {% if g == filters.genre_filter %}selected{% endif %}>{{ g }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="slider-container">
+            <label for="min_musical_value">Min Musical Value: <span id="min_musical_value_display">{{ filters.min_musical_value }}</span></label>
+            <input type="range" id="min_musical_value" name="min_musical_value" min="1" max="10" value="{{ filters.min_musical_value }}">
+        </div>
+        <div class="slider-container">
+            <label for="min_video_value">Min Video Value: <span id="min_video_value_display">{{ filters.min_video_value }}</span></label>
+            <input type="range" id="min_video_value" name="min_video_value" min="1" max="10" value="{{ filters.min_video_value }}">
+        </div>
+        <div class="checkbox-group" style="padding-top: 15px;">
+            <input type="checkbox" id="favorite_only" name="favorite_only" {% if filters.favorite_only %}checked{% endif %}>
+            <label for="favorite_only">Favorites Only</label>
+        </div>
+        <div class="checkbox-group" style="padding-top: 15px;">
+            <input type="checkbox" id="include_unrated" name="include_unrated" {% if filters.include_unrated %}checked{% endif %}>
+            <label for="include_unrated">Include Unrated</label>
+        </div>
+        <div class="checkbox-group" style="padding-top: 15px;">
+            <input type="checkbox" id="exclude_rejected" name="exclude_rejected" {% if filters.exclude_rejected %}checked{% endif %}>
+            <label for="exclude_rejected">Exclude Rejected</label>
+        </div>
+        <div class="button-group">
+             <button type="submit" class="next-button">Apply & Next Video</button>
+        </div>
+    </form>
+
+    <hr style="border-color: #333; margin: 30px 0;">
+
+    {% if video %}
+        <h2>{{ video.title }}</h2>
+
+        <!-- YouTube Player -->
+        <div class="video-container">
+            <div id="player"></div>
+        </div>
+
+        <form action="{{ url_for('save_play_rating', video_id=video.video_id) }}" method="post">
+            <!-- Hidden fields to preserve filters -->
+            <input type="hidden" name="min_musical_value_hidden" value="{{ filters.min_musical_value }}">
+            <input type="hidden" name="min_video_value_hidden" value="{{ filters.min_video_value }}">
+            <input type="hidden" name="genre_filter_hidden" value="{{ filters.genre_filter }}">
+            <input type="hidden" name="favorite_only_hidden" value="{{ 'true' if filters.favorite_only else 'false' }}">
+            <input type="hidden" name="include_unrated_hidden" value="{{ 'true' if filters.include_unrated else 'false' }}">
+            <input type="hidden" name="exclude_rejected_hidden" value="{{ 'true' if filters.exclude_rejected else 'false' }}">
+
+            <!-- Ratings -->
+            <div class="slider-container">
+                <label for="musical_value">Musical Value: <span id="musical_value_display">{{ video.musical_value }}</span></label>
+                <input type="range" id="musical_value" name="musical_value" min="1" max="10" value="{{ video.musical_value }}" required>
+            </div>
+            <div class="slider-container">
+                <label for="video_value">Video Value: <span id="video_value_display">{{ video.video_value }}</span></label>
+                <input type="range" id="video_value" name="video_value" min="1" max="10" value="{{ video.video_value }}" required>
+            </div>
+
+            <!-- Genre -->
+            <div>
+                <label for="genre">Genre:</label>
+                <input type="text" id="genre" name="genre" value="{{ video.genre }}" list="genre_list" autocomplete="off">
+                <datalist id="genre_list">
+                    {% for g in genres %}
+                        <option value="{{ g }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+
+            <!-- Booleans -->
+            <div style="display: flex; gap: 20px;">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
+                    <label for="favorite">⭐ Favorite</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="rejected" name="rejected" {% if video.rejected %}checked{% endif %}>
+                    <label for="rejected">❌ Rejected</label>
+                </div>
+            </div>
+
+            <!-- Buttons -->
+            <div class="button-group">
+                <button type="submit" class="save-button">Save & Next</button>
+                <a href="{{ url_for('playing_mode', **filters) }}" class="button-link next-button">Skip & Next</a>
+            </div>
+        </form>
+
+        <div class="info">
+            <p><strong>Source:</strong> <a href="{{ video.source }}" target="_blank">{{ video.source }}</a></p>
+            <p><strong>Video ID:</strong> {{ video.video_id }}</p>
+            <p><strong>YouTube Upload:</strong> {{ video.date_youtube }}</p>
+            <p><strong>Substack Published:</strong> {{ video.date_substack }}</p>
+            <p><strong>Added to Prism:</strong> {{ video.date_prism or video.created_at }}</p>
+            <p><strong>Last Rated:</strong> {{ video.date_rated }}</p>
+        </div>
+
+    {% else %}
+        <h1>No videos match your filter criteria!</h1>
+        <p>Try adjusting the filters above.</p>
+    {% endif %}
+</div>
+
+<script>
+    var tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    var firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+    var player;
+    function onYouTubeIframeAPIReady() {
+        player = new YT.Player('player', {
+            height: '390',
+            width: '640',
+            videoId: '{{ video.video_id if video else "" }}',
+            playerVars: {
+                'playsinline': 1,
+                'autoplay': 1
+            }
+        });
+    }
+
+    // Script for sliders
+    document.addEventListener('DOMContentLoaded', function() {
+        // Filter sliders
+        const minMusicalValueSlider = document.getElementById('min_musical_value');
+        const minMusicalValueDisplay = document.getElementById('min_musical_value_display');
+        if (minMusicalValueSlider) {
+            minMusicalValueSlider.oninput = function() { minMusicalValueDisplay.textContent = this.value; }
+        }
+
+        const minVideoValueSlider = document.getElementById('min_video_value');
+        const minVideoValueDisplay = document.getElementById('min_video_value_display');
+        if (minVideoValueSlider) {
+            minVideoValueSlider.oninput = function() { minVideoValueDisplay.textContent = this.value; }
+        }
+
+        // Rating sliders
+        const musicalValueSlider = document.getElementById('musical_value');
+        const musicalValueDisplay = document.getElementById('musical_value_display');
+        if (musicalValueSlider) {
+            musicalValueSlider.oninput = function() { musicalValueDisplay.textContent = this.value; }
+        }
+
+        const videoValueSlider = document.getElementById('video_value');
+        const videoValueDisplay = document.getElementById('video_value_display');
+        if (videoValueSlider) {
+            videoValueSlider.oninput = function() { videoValueDisplay.textContent = this.value; }
+        }
+    });
+</script>
+
+</body>
+</html>
