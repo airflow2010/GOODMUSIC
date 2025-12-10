@@ -11,10 +11,13 @@
         .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
         h1, h2, h3 { color: #ffffff; }
         form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .filter-form { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 20px; grid-template-columns: none; }
-        .filter-form > div { flex: 1 1 150px; }
+        .filter-form { display: flex; flex-direction: column; gap: 12px; background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+        .filter-row { display: grid; gap: 15px; align-items: center; }
+        .filter-row-top { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+        .filter-row-bottom { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .filter-form label { font-size: 0.9em; }
-        .filter-form .button-group { grid-column: auto; }
+        .filter-form .checkbox-group { margin-bottom: 0; }
+        .filter-actions { display: flex; justify-content: flex-end; }
         label { display: block; margin-bottom: 5px; font-size: 1.1em; }
         input[type="text"], input[type="number"], select {
             width: 100%; padding: 8px; box-sizing: border-box; background-color: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px;
@@ -55,39 +58,43 @@
     </div>
 
     <!-- Filter Form -->
+    <h3>Filters</h3>
     <form class="filter-form" action="{{ url_for('playing_mode') }}" method="post">
-        <h3>Filters</h3>
-        <div>
-            <label for="genre_filter">Genre:</label>
-            <select id="genre_filter" name="genre_filter">
-                <option value="All" {% if filters.genre_filter == 'All' %}selected{% endif %}>All Genres</option>
-                {% for g in genres %}
-                    <option value="{{ g }}" {% if g == filters.genre_filter %}selected{% endif %}>{{ g }}</option>
-                {% endfor %}
-            </select>
+        <div class="filter-row filter-row-top">
+            <div>
+                <label for="genre_filter">Genre:</label>
+                <select id="genre_filter" name="genre_filter">
+                    <option value="All" {% if filters.genre_filter == 'All' %}selected{% endif %}>All Genres</option>
+                    {% for g in genres %}
+                        <option value="{{ g }}" {% if g == filters.genre_filter %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="slider-container">
+                <label for="min_musical_value">Min Musical Value: <span id="min_musical_value_display">{{ filters.min_musical_value }}</span></label>
+                <input type="range" id="min_musical_value" name="min_musical_value" min="1" max="10" value="{{ filters.min_musical_value }}">
+            </div>
+            <div class="slider-container">
+                <label for="min_video_value">Min Video Value: <span id="min_video_value_display">{{ filters.min_video_value }}</span></label>
+                <input type="range" id="min_video_value" name="min_video_value" min="1" max="10" value="{{ filters.min_video_value }}">
+            </div>
         </div>
-        <div class="slider-container">
-            <label for="min_musical_value">Min Musical Value: <span id="min_musical_value_display">{{ filters.min_musical_value }}</span></label>
-            <input type="range" id="min_musical_value" name="min_musical_value" min="1" max="10" value="{{ filters.min_musical_value }}">
-        </div>
-        <div class="slider-container">
-            <label for="min_video_value">Min Video Value: <span id="min_video_value_display">{{ filters.min_video_value }}</span></label>
-            <input type="range" id="min_video_value" name="min_video_value" min="1" max="10" value="{{ filters.min_video_value }}">
-        </div>
-        <div class="checkbox-group" style="padding-top: 15px;">
-            <input type="checkbox" id="favorite_only" name="favorite_only" {% if filters.favorite_only %}checked{% endif %}>
-            <label for="favorite_only">Favorites Only</label>
-        </div>
-        <div class="checkbox-group" style="padding-top: 15px;">
-            <input type="checkbox" id="include_unrated" name="include_unrated" {% if filters.include_unrated %}checked{% endif %}>
-            <label for="include_unrated">Include Unrated</label>
-        </div>
-        <div class="checkbox-group" style="padding-top: 15px;">
-            <input type="checkbox" id="exclude_rejected" name="exclude_rejected" {% if filters.exclude_rejected %}checked{% endif %}>
-            <label for="exclude_rejected">Exclude Rejected</label>
-        </div>
-        <div class="button-group">
-             <button type="submit" class="next-button">Apply & Next Video</button>
+        <div class="filter-row filter-row-bottom">
+            <div class="checkbox-group">
+                <input type="checkbox" id="favorite_only" name="favorite_only" {% if filters.favorite_only %}checked{% endif %}>
+                <label for="favorite_only">Favorites Only</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="include_unrated" name="include_unrated" {% if filters.include_unrated %}checked{% endif %}>
+                <label for="include_unrated">Include Unrated</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="exclude_rejected" name="exclude_rejected" {% if filters.exclude_rejected %}checked{% endif %}>
+                <label for="exclude_rejected">Exclude Rejected</label>
+            </div>
+            <div class="filter-actions">
+                <button type="submit" class="next-button">Apply & Next Video</button>
+            </div>
         </div>
     </form>
 

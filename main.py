@@ -95,7 +95,7 @@ def playing_mode():
         exclude_rejected = 'exclude_rejected' in source
     else:
         favorite_only = source.get('favorite_only', 'false') == 'true'
-        include_unrated = source.get('include_unrated', 'true') == 'true'
+        include_unrated = source.get('include_unrated', 'false') == 'true'
         exclude_rejected = source.get('exclude_rejected', 'true') == 'true'
 
     # --- Fetch and Filter Videos ---
