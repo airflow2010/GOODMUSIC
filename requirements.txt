@@ -1,0 +1,8 @@
+Flask>=2.0
+google-cloud-firestore>=2.5
+google-auth>=2.6
+requests>=2.27
+beautifulsoup4
+google-api-python-client
+google-auth-oauthlib
+google-cloud-aiplatform
