@@ -1,4 +1,4 @@
-# PRISM GoodMusic Toolkit
+# GOODMUSIC PRISM Toolkit
 
 Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, creating YouTube playlists, and rating/filtering videos via a small Flask UI.
 
@@ -82,8 +82,9 @@ Auth:
 - Requires `client_secret.json`; first run writes `token.pickle`.
 - Enable YouTube Data API v3 in your project.
 
-### 2) Run the Flask UI
+### 2a) Run the Flask UI locally
 `prism-gui.py` serves:
+
 - `/rate` — shows unrated videos (`musical_value == 0`) to rate.
 - `/play` — lets you filter (genre, min ratings, favorites, unrated inclusion, rejected exclusion) and play/rate.
 ```bash
@@ -92,6 +93,16 @@ python prism-gui.py
 # open http://127.0.0.1:8080
 ```
 For production you can run `gunicorn prism-gui:app`.
+
+### 3) Run the Flask UI in Google Cloud
+```bash
+gcloud run deploy prism-gui \
+  --source . \
+  --platform managed \
+  --region europe-west4 \
+  --allow-unauthenticated \
+  --set-env-vars="AUTH_USERNAME=<USER>,AUTH_PASSWORD=<PASSWORD>,GCP_PROJECT=<PROJECT_ID>"
+```
 
 ## Operational tips
 - Quotas: YouTube inserts and playlist creation consume quota; the playlist script stops and cleans up on `quotaExceeded`.

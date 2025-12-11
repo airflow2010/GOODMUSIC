@@ -1,6 +1,7 @@
 import os
 import random
-from flask import Flask, render_template, request, redirect, url_for
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, Response
 from google.cloud import firestore
 
 # --- Configuration ---
@@ -14,6 +15,10 @@ if not PROJECT_ID:
 
 COLLECTION_NAME = "musicvideos"
 
+# --- Authentication Configuration ---
+AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "admin")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "changeme")
+
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
@@ -25,7 +30,29 @@ except Exception as e:
     db = None
 
 
+# --- Auth Decorator ---
+def check_auth(username, password):
+    """Checks if the username and password are correct."""
+    return username == AUTH_USERNAME and password == AUTH_PASSWORD
+
+def authenticate():
+    """Sends a 401 response that enables basic auth."""
+    return Response(
+    'Could not verify your access level for that URL.\n'
+    'You have to login with proper credentials', 401,
+    {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
 @app.route("/")
+@requires_auth
 def index():
     """
     Redirects the root URL to the rating page.
@@ -34,6 +61,7 @@ def index():
 
 
 @app.route("/rate", methods=['GET'])
+@requires_auth
 def rating_mode():
     """
     Presents a random, unrated music video to the user.
@@ -74,6 +102,7 @@ def rating_mode():
 
 
 @app.route('/play', methods=['GET', 'POST'])
+@requires_auth
 def playing_mode():
     """
     Presents a random, filtered music video to the user, with editing capabilities.
@@ -160,6 +189,7 @@ def playing_mode():
     return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters)
 
 @app.route("/save_rating/<string:video_id>", methods=['POST'])
+@requires_auth
 def save_rating(video_id):
     """
     Saves the user's rating and other attributes to the database.
@@ -189,6 +219,7 @@ def save_rating(video_id):
     return redirect(url_for('rating_mode'))
 
 @app.route("/save_play_rating/<string:video_id>", methods=['POST'])
+@requires_auth
 def save_play_rating(video_id):
     """
     Saves ratings from the play mode and redirects back to play mode
@@ -223,7 +254,6 @@ def save_play_rating(video_id):
     return redirect(url_for('playing_mode', **{k: v for k, v in filters.items() if v is not None}))
 
 if __name__ == "__main__":
-    # For local development:
-    # To run this, use: `python main.py`
-    # And open your browser to http://127.0.0.1:8080
-    app.run(host="127.0.0.1", port=8080, debug=True)
+    # Use PORT environment variable for Cloud Run
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=False)
