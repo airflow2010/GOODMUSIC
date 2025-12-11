@@ -71,12 +71,12 @@
                 </select>
             </div>
             <div class="slider-container">
-                <label for="min_musical_value">Min Musical Value: <span id="min_musical_value_display">{{ filters.min_musical_value }}</span></label>
-                <input type="range" id="min_musical_value" name="min_musical_value" min="1" max="10" value="{{ filters.min_musical_value }}">
+                <label for="min_rating_music">Min Musical Value: <span id="min_rating_music_display">{{ filters.min_rating_music }}</span></label>
+                <input type="range" id="min_rating_music" name="min_rating_music" min="1" max="5" value="{{ filters.min_rating_music }}">
             </div>
             <div class="slider-container">
-                <label for="min_video_value">Min Video Value: <span id="min_video_value_display">{{ filters.min_video_value }}</span></label>
-                <input type="range" id="min_video_value" name="min_video_value" min="1" max="10" value="{{ filters.min_video_value }}">
+                <label for="min_rating_video">Min Video Value: <span id="min_rating_video_display">{{ filters.min_rating_video }}</span></label>
+                <input type="range" id="min_rating_video" name="min_rating_video" min="1" max="5" value="{{ filters.min_rating_video }}">
             </div>
         </div>
         <div class="filter-row filter-row-bottom">
@@ -111,21 +111,29 @@
 
         <form action="{{ url_for('save_play_rating', video_id=video.video_id) }}" method="post">
             <!-- Hidden fields to preserve filters -->
-            <input type="hidden" name="min_musical_value_hidden" value="{{ filters.min_musical_value }}">
-            <input type="hidden" name="min_video_value_hidden" value="{{ filters.min_video_value }}">
+            <input type="hidden" name="min_rating_music_hidden" value="{{ filters.min_rating_music }}">
+            <input type="hidden" name="min_rating_video_hidden" value="{{ filters.min_rating_video }}">
             <input type="hidden" name="genre_filter_hidden" value="{{ filters.genre_filter }}">
             <input type="hidden" name="favorite_only_hidden" value="{{ 'true' if filters.favorite_only else 'false' }}">
             <input type="hidden" name="include_unrated_hidden" value="{{ 'true' if filters.include_unrated else 'false' }}">
             <input type="hidden" name="exclude_rejected_hidden" value="{{ 'true' if filters.exclude_rejected else 'false' }}">
 
             <!-- Ratings -->
-            <div class="slider-container">
-                <label for="musical_value">Musical Value: <span id="musical_value_display">{{ video.musical_value }}</span></label>
-                <input type="range" id="musical_value" name="musical_value" min="1" max="10" value="{{ video.musical_value }}" required>
+            <div>
+                <label for="rating_music">Musical Value:</label>
+                <select id="rating_music" name="rating_music" required>
+                    {% for val, desc in music_ratings.items()|sort(reverse=True) %}
+                        <option value="{{ val }}" {% if val == video.rating_music %}selected{% endif %}>{{ desc }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="slider-container">
-                <label for="video_value">Video Value: <span id="video_value_display">{{ video.video_value }}</span></label>
-                <input type="range" id="video_value" name="video_value" min="1" max="10" value="{{ video.video_value }}" required>
+            <div>
+                <label for="rating_video">Video Value:</label>
+                <select id="rating_video" name="rating_video" required>
+                    {% for val, desc in video_ratings.items()|sort(reverse=True) %}
+                        <option value="{{ val }}" {% if val == video.rating_video %}selected{% endif %}>{{ desc }}</option>
+                    {% endfor %}
+                </select>
             </div>
 
             <!-- Genre -->
@@ -227,29 +235,16 @@
     // Script for sliders
     document.addEventListener('DOMContentLoaded', function() {
         // Filter sliders
-        const minMusicalValueSlider = document.getElementById('min_musical_value');
-        const minMusicalValueDisplay = document.getElementById('min_musical_value_display');
-        if (minMusicalValueSlider) {
-            minMusicalValueSlider.oninput = function() { minMusicalValueDisplay.textContent = this.value; }
+        const minRatingMusicSlider = document.getElementById('min_rating_music');
+        const minRatingMusicDisplay = document.getElementById('min_rating_music_display');
+        if (minRatingMusicSlider) {
+            minRatingMusicSlider.oninput = function() { minRatingMusicDisplay.textContent = this.value; }
         }
 
-        const minVideoValueSlider = document.getElementById('min_video_value');
-        const minVideoValueDisplay = document.getElementById('min_video_value_display');
-        if (minVideoValueSlider) {
-            minVideoValueSlider.oninput = function() { minVideoValueDisplay.textContent = this.value; }
-        }
-
-        // Rating sliders
-        const musicalValueSlider = document.getElementById('musical_value');
-        const musicalValueDisplay = document.getElementById('musical_value_display');
-        if (musicalValueSlider) {
-            musicalValueSlider.oninput = function() { musicalValueDisplay.textContent = this.value; }
-        }
-
-        const videoValueSlider = document.getElementById('video_value');
-        const videoValueDisplay = document.getElementById('video_value_display');
-        if (videoValueSlider) {
-            videoValueSlider.oninput = function() { videoValueDisplay.textContent = this.value; }
+        const minRatingVideoSlider = document.getElementById('min_rating_video');
+        const minRatingVideoDisplay = document.getElementById('min_rating_video_display');
+        if (minRatingVideoSlider) {
+            minRatingVideoSlider.oninput = function() { minRatingVideoDisplay.textContent = this.value; }
         }
     });
 </script>

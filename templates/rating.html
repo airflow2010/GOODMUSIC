@@ -73,13 +73,21 @@
 
         <form action="{{ url_for('save_rating', video_id=video.video_id) }}" method="post">
             <!-- Ratings -->
-            <div class="slider-container">
-                <label for="musical_value">Musical Value: <span id="musical_value_display">5</span></label>
-                <input type="range" id="musical_value" name="musical_value" min="1" max="10" value="5" required>
+            <div>
+                <label for="rating_music">Musical Value:</label>
+                <select id="rating_music" name="rating_music" required>
+                    {% for val, desc in music_ratings.items()|sort(reverse=True) %}
+                        <option value="{{ val }}" {% if val == 3 %}selected{% endif %}>{{ desc }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="slider-container">
-                <label for="video_value">Video Value: <span id="video_value_display">5</span></label>
-                <input type="range" id="video_value" name="video_value" min="1" max="10" value="5" required>
+            <div>
+                <label for="rating_video">Video Value:</label>
+                <select id="rating_video" name="rating_video" required>
+                    {% for val, desc in video_ratings.items()|sort(reverse=True) %}
+                        <option value="{{ val }}" {% if val == 3 %}selected{% endif %}>{{ desc }}</option>
+                    {% endfor %}
+                </select>
             </div>
 
             <!-- Genre -->
@@ -148,25 +156,7 @@
 
     // Script for sliders
     document.addEventListener('DOMContentLoaded', function() {
-        const musicalValueSlider = document.getElementById('musical_value');
-        const musicalValueDisplay = document.getElementById('musical_value_display');
-        const videoValueSlider = document.getElementById('video_value');
-        const videoValueDisplay = document.getElementById('video_value_display');
         const genreInput = document.getElementById('genre');
-
-        if (musicalValueSlider && musicalValueDisplay) {
-            musicalValueDisplay.textContent = musicalValueSlider.value;
-            musicalValueSlider.oninput = function() {
-                musicalValueDisplay.textContent = this.value;
-            }
-        }
-
-        if (videoValueSlider && videoValueDisplay) {
-            videoValueDisplay.textContent = videoValueSlider.value;
-            videoValueSlider.oninput = function() {
-                videoValueDisplay.textContent = this.value;
-            }
-        }
 
         // Show all genre options even when the field is prefilled.
         if (genreInput) {

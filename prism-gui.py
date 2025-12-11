@@ -19,6 +19,23 @@ COLLECTION_NAME = "musicvideos"
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "changeme")
 
+# --- Rating Descriptions ---
+MUSIC_RATINGS = {
+    5: "5️⃣ 🤩 Masterpiece",
+    4: "4️⃣ 🙂 Strong",
+    3: "3️⃣ 😐 Decent",
+    2: "2️⃣ 🥱 Weak",
+    1: "1️⃣ 😖 Awful",
+}
+
+VIDEO_RATINGS = {
+    5: "5️⃣ 🤩 Visionary",
+    4: "4️⃣ 🙂 Creative",
+    3: "3️⃣ 😐 OK",
+    2: "2️⃣ 🥱 Meh",
+    1: "1️⃣ 😖 Unwatchable",
+}
+
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
@@ -88,17 +105,17 @@ def rating_mode():
         sorted_genres = []
 
     # Query for unrated videos (where musical_value is 0)
-    query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("musical_value", "==", 0)).limit(20).stream()
+    query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("date_rated", "==", None)).limit(20).stream()
     
     unrated_videos = [doc.to_dict() for doc in query]
 
     if not unrated_videos:
-        return "No unrated videos found!"
+        return render_template('rating.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
 
     # Select a random video from the fetched list
     video = random.choice(unrated_videos)
 
-    return render_template('rating.html', video=video, genres=sorted_genres)
+    return render_template('rating.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
 
 
 @app.route('/play', methods=['GET', 'POST'])
@@ -114,8 +131,8 @@ def playing_mode():
     # Filters can come from a POST (submitting the filter form) or GET (direct link, or redirect after save)
     source = request.form if request.method == 'POST' else request.args
 
-    min_musical_value = source.get('min_musical_value', 1, type=int)
-    min_video_value = source.get('min_video_value', 1, type=int)
+    min_rating_music = source.get('min_rating_music', 1, type=int)
+    min_rating_video = source.get('min_rating_video', 1, type=int)
     genre_filter = source.get('genre_filter', 'All')
 
     if request.method == 'POST':
@@ -142,17 +159,17 @@ def playing_mode():
 
         # --- Query 1: Get RATED videos that meet the criteria ---
         # This query uses multiple range filters (>=), which requires a composite index.
-        rated_query = base_query.where(
-            filter=firestore.FieldFilter("musical_value", ">=", min_musical_value)
+        rated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "!=", None)).where(
+            filter=firestore.FieldFilter("rating_music", ">=", min_rating_music)
         ).where(
-            filter=firestore.FieldFilter("video_value", ">=", min_video_value)
+            filter=firestore.FieldFilter("rating_video", ">=", min_rating_video)
         )
         rated_docs = rated_query.stream()
         candidate_videos.extend([doc.to_dict() for doc in rated_docs])
 
         # --- Query 2: Get UNRATED videos, if requested ---
         if include_unrated:
-            unrated_query = base_query.where(filter=firestore.FieldFilter("musical_value", "==", 0))
+            unrated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "==", None))
             unrated_docs = unrated_query.stream()
             candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
 
@@ -178,15 +195,15 @@ def playing_mode():
         sorted_genres = []
 
     current_filters = {
-        'min_musical_value': min_musical_value,
-        'min_video_value': min_video_value,
+        'min_rating_music': min_rating_music,
+        'min_rating_video': min_rating_video,
         'genre_filter': genre_filter,
         'favorite_only': favorite_only,
         'include_unrated': include_unrated,
         'exclude_rejected': exclude_rejected,
     }
 
-    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters)
+    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
 
 @app.route("/save_rating/<string:video_id>", methods=['POST'])
 @requires_auth
@@ -202,8 +219,8 @@ def save_rating(video_id):
 
         # Prepare the data to update
         update_data = {
-            'musical_value': int(request.form.get('musical_value', 0)),
-            'video_value': int(request.form.get('video_value', 0)),
+            'rating_music': int(request.form.get('rating_music', 3)),
+            'rating_video': int(request.form.get('rating_video', 3)),
             'genre': request.form.get('genre', 'Unknown'),
             'favorite': 'favorite' in request.form,
             'rejected': 'rejected' in request.form,
@@ -231,8 +248,8 @@ def save_play_rating(video_id):
     try:
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
         update_data = {
-            'musical_value': int(request.form.get('musical_value', 0)),
-            'video_value': int(request.form.get('video_value', 0)),
+            'rating_music': int(request.form.get('rating_music', 3)),
+            'rating_video': int(request.form.get('rating_video', 3)),
             'genre': request.form.get('genre', 'Unknown'),
             'favorite': 'favorite' in request.form,
             'rejected': 'rejected' in request.form,
@@ -244,8 +261,8 @@ def save_play_rating(video_id):
 
     # Re-apply filters for the next video by redirecting with query parameters
     filters = {
-        'min_musical_value': request.form.get('min_musical_value_hidden'),
-        'min_video_value': request.form.get('min_video_value_hidden'),
+        'min_rating_music': request.form.get('min_rating_music_hidden'),
+        'min_rating_video': request.form.get('min_rating_video_hidden'),
         'genre_filter': request.form.get('genre_filter_hidden'),
         'favorite_only': request.form.get('favorite_only_hidden'),
         'include_unrated': request.form.get('include_unrated_hidden'),

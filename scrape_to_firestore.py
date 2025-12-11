@@ -313,8 +313,8 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         data = {
             "video_id": video_id,
             "source": post_url,
-            "musical_value": 0,
-            "video_value": 0,
+            "rating_music": 3,
+            "rating_video": 3,
             "genre": genre,
             "favorite": False,
             "rejected": False,
