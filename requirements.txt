@@ -1,9 +1,17 @@
+# Google Cloud & API Client Libraries
 google-auth>=2.6
-requests>=2.27
-beautifulsoup4
 google-api-python-client
 google-auth-oauthlib
 google-cloud-aiplatform
-Flask==3.0.0
 google-cloud-firestore==2.13.1
+
+# Web Scraping
+requests>=2.27
+beautifulsoup4
+
+# Web Server (Flask App)
+Flask==3.0.0
 gunicorn==21.2.0
+
+# Utilities
+python-dotenv

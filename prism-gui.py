@@ -1,8 +1,12 @@
 import os
 import random
 from functools import wraps
+
 from flask import Flask, render_template, request, redirect, url_for, Response
 from google.cloud import firestore
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- Configuration ---
 # Get the project ID from the environment variable.
@@ -16,8 +20,11 @@ if not PROJECT_ID:
 COLLECTION_NAME = "musicvideos"
 
 # --- Authentication Configuration ---
-AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "admin")
-AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "changeme")
+AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD")
+
+if not AUTH_USERNAME or not AUTH_PASSWORD:
+    raise ValueError("AUTH_USERNAME and AUTH_PASSWORD environment variables must be set.")
 
 # --- Rating Descriptions ---
 MUSIC_RATINGS = {
