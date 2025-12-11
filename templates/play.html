@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Playing Mode</title>
+    <title>GOODMUSIC prism</title>
     <style>
         body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; margin: 20px; }
         .container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; }
@@ -52,8 +52,8 @@
             <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
         </div>
         <select onchange="window.location.href=this.value" style="font-size: 1.5em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
-            <option value="{{ url_for('rating_mode') }}">Rate Music Video</option>
-            <option value="{{ url_for('playing_mode') }}" selected>Play Music Video</option>
+            <option value="{{ url_for('rating_mode') }}">rate</option>
+            <option value="{{ url_for('playing_mode') }}" selected>play</option>
         </select>
     </div>
 
@@ -62,7 +62,7 @@
     <form class="filter-form" action="{{ url_for('playing_mode') }}" method="post">
         <div class="filter-row filter-row-top">
             <div>
-                <label for="genre_filter">Genre:</label>
+                <label for="genre_filter">genre:</label>
                 <select id="genre_filter" name="genre_filter">
                     <option value="All" {% if filters.genre_filter == 'All' %}selected{% endif %}>All Genres</option>
                     {% for g in genres %}
@@ -71,26 +71,26 @@
                 </select>
             </div>
             <div class="slider-container">
-                <label for="min_rating_music">Min Musical Value: <span id="min_rating_music_display">{{ filters.min_rating_music }}</span></label>
+                <label for="min_rating_music">min_rating_music: <span id="min_rating_music_display">{{ filters.min_rating_music }}</span></label>
                 <input type="range" id="min_rating_music" name="min_rating_music" min="1" max="5" value="{{ filters.min_rating_music }}">
             </div>
             <div class="slider-container">
-                <label for="min_rating_video">Min Video Value: <span id="min_rating_video_display">{{ filters.min_rating_video }}</span></label>
+                <label for="min_rating_video">min_rating_video: <span id="min_rating_video_display">{{ filters.min_rating_video }}</span></label>
                 <input type="range" id="min_rating_video" name="min_rating_video" min="1" max="5" value="{{ filters.min_rating_video }}">
             </div>
         </div>
         <div class="filter-row filter-row-bottom">
             <div class="checkbox-group">
                 <input type="checkbox" id="favorite_only" name="favorite_only" {% if filters.favorite_only %}checked{% endif %}>
-                <label for="favorite_only">Favorites Only</label>
+                <label for="favorite_only">favorite_only</label>
             </div>
             <div class="checkbox-group">
                 <input type="checkbox" id="include_unrated" name="include_unrated" {% if filters.include_unrated %}checked{% endif %}>
-                <label for="include_unrated">Include Unrated</label>
+                <label for="include_unrated">include_unrated</label>
             </div>
             <div class="checkbox-group">
                 <input type="checkbox" id="exclude_rejected" name="exclude_rejected" {% if filters.exclude_rejected %}checked{% endif %}>
-                <label for="exclude_rejected">Exclude Rejected</label>
+                <label for="exclude_rejected">exclude_rejected</label>
             </div>
             <div class="filter-actions">
                 <button type="submit" class="next-button">Apply & Next Video</button>
@@ -120,7 +120,7 @@
 
             <!-- Ratings -->
             <div>
-                <label for="rating_music">Musical Value:</label>
+                <label for="rating_music">rating_music:</label>
                 <select id="rating_music" name="rating_music" required>
                     {% for val, desc in music_ratings.items()|sort(reverse=True) %}
                         <option value="{{ val }}" {% if val == video.rating_music %}selected{% endif %}>{{ desc }}</option>
@@ -128,7 +128,7 @@
                 </select>
             </div>
             <div>
-                <label for="rating_video">Video Value:</label>
+                <label for="rating_video">rating_video:</label>
                 <select id="rating_video" name="rating_video" required>
                     {% for val, desc in video_ratings.items()|sort(reverse=True) %}
                         <option value="{{ val }}" {% if val == video.rating_video %}selected{% endif %}>{{ desc }}</option>
@@ -138,7 +138,7 @@
 
             <!-- Genre -->
             <div>
-                <label for="genre">Genre:</label>
+                <label for="genre">genre:</label>
                 <input type="text" id="genre" name="genre" value="{{ video.genre }}" list="genre_list" autocomplete="off">
                 <datalist id="genre_list">
                     {% for g in genres %}
@@ -151,11 +151,11 @@
             <div style="display: flex; gap: 20px;">
                 <div class="checkbox-group">
                     <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
-                    <label for="favorite">⭐ Favorite</label>
+                    <label for="favorite">⭐ favorite</label>
                 </div>
                 <div class="checkbox-group">
                     <input type="checkbox" id="rejected" name="rejected" {% if video.rejected %}checked{% endif %}>
-                    <label for="rejected">❌ Rejected</label>
+                    <label for="rejected">❌ rejected</label>
                 </div>
             </div>
 
@@ -167,12 +167,12 @@
         </form>
 
         <div class="info">
-            <p><strong>Source:</strong> <a href="{{ video.source }}" target="_blank">{{ video.source }}</a></p>
-            <p><strong>Video ID:</strong> {{ video.video_id }}</p>
-            <p><strong>YouTube Upload:</strong> {{ video.date_youtube }}</p>
-            <p><strong>Substack Published:</strong> {{ video.date_substack }}</p>
-            <p><strong>Added to Prism:</strong> {{ video.date_prism or video.created_at }}</p>
-            <p><strong>Last Rated:</strong> {{ video.date_rated }}</p>
+            <p><strong>source:</strong> <a href="{{ video.source }}" target="_blank">{{ video.source }}</a></p>
+            <p><strong>video_id:</strong> {{ video.video_id }}</p>
+            <p><strong>date_youtube:</strong> {{ video.date_youtube }}</p>
+            <p><strong>date_substack:</strong> {{ video.date_substack }}</p>
+            <p><strong>date_prism:</strong> {{ video.date_prism or video.created_at }}</p>
+            <p><strong>date_rated:</strong> {{ video.date_rated }}</p>
         </div>
 
     {% else %}
