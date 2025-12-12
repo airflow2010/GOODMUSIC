@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 from functools import wraps
 
@@ -12,18 +13,82 @@ load_dotenv()
 # Get the project ID from the environment variable.
 # This is set automatically when running on Google Cloud.
 PROJECT_ID = os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT")
-if not PROJECT_ID:
-    # Ensure you have run `gcloud auth application-default login` or set the env var
-    raise ValueError("PROJECT_ID environment variable must be set.")
-
 COLLECTION_NAME = "musicvideos"
 
 # --- Authentication Configuration ---
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD")
 
-if not AUTH_USERNAME or not AUTH_PASSWORD:
-    raise ValueError("AUTH_USERNAME and AUTH_PASSWORD environment variables must be set.")
+def check_prerequisites():
+    """Checks for prerequisites for successful deployment and refuses to start if not met."""
+    missing_vars = []
+    if not PROJECT_ID:
+        missing_vars.append("PROJECT_ID (or GCP_PROJECT)")
+    if not AUTH_USERNAME:
+        missing_vars.append("AUTH_USERNAME")
+    if not AUTH_PASSWORD:
+        missing_vars.append("AUTH_PASSWORD")
+
+    if missing_vars:
+        print("\n" + "!" * 60)
+        print("❌ STARTUP ERROR: Missing configuration variables.")
+        print("!" * 60)
+        print("The following environment variables are missing:")
+        for var in missing_vars:
+            print(f"   - {var}")
+        print("\nINSTRUCTIONS:")
+        if os.environ.get("K_SERVICE"):
+            print("   You appear to be running on Google Cloud Run.")
+            print("   Ensure you have mounted the Google Cloud Secrets as environment variables.")
+            print("   Verify your 'gcloud run deploy' command includes:")
+            print('   --set-secrets="AUTH_USERNAME=prism-auth-username:latest,AUTH_PASSWORD=prism-auth-password:latest,PROJECT_ID=prism-auth-projectid:latest"')
+        else:
+            print("   You appear to be running locally.")
+            print("   Ensure you have a .env file or exported environment variables.")
+        sys.exit(1)
+
+    # Check for required templates
+    required_templates = ['rate.html', 'play.html']
+    missing_templates = []
+    for t in required_templates:
+        if not os.path.exists(os.path.join('templates', t)):
+            missing_templates.append(t)
+
+    if missing_templates:
+        print("\n" + "!" * 60)
+        print("❌ STARTUP ERROR: Missing HTML templates.")
+        print("!" * 60)
+        print("The following templates are missing in the 'templates/' directory:")
+        for t in missing_templates:
+            print(f"   - {t}")
+        sys.exit(1)
+
+    print(f"✅ Configuration loaded for Project ID: {PROJECT_ID}")
+
+def check_firestore_access(db_client):
+    """Verifies access to the specific collection and warns if empty."""
+    print(f"🔍 Checking access to Firestore collection: {COLLECTION_NAME}...")
+    try:
+        # Attempt to fetch a single document to verify read permissions and data existence
+        docs = list(db_client.collection(COLLECTION_NAME).limit(1).stream())
+        if not docs:
+            print(f"⚠️  WARNING: The Firestore collection '{COLLECTION_NAME}' appears to be empty.")
+            print("   The application will start, but you may not see any videos.")
+            print("   Run 'python scrape_to_firestore.py' to populate the database.")
+        else:
+            print(f"✅ Firestore collection '{COLLECTION_NAME}' is accessible and contains data.")
+    except Exception as e:
+        print("\n" + "!" * 60)
+        print(f"❌ STARTUP ERROR: Could not read from collection '{COLLECTION_NAME}'.")
+        print("!" * 60)
+        print(f"Error details: {e}")
+        print("\nINSTRUCTIONS:")
+        print("   1. Ensure the Service Account has 'Cloud Datastore User' permissions.")
+        print("   2. Verify the collection name is correct.")
+        sys.exit(1)
+
+# Perform checks before initializing the app
+check_prerequisites()
 
 # --- Rating Descriptions ---
 MUSIC_RATINGS = {
@@ -49,9 +114,18 @@ app = Flask(__name__)
 try:
     db = firestore.Client(project=PROJECT_ID)
 except Exception as e:
-    print(f"Error initializing Firestore client: {e}")
-    db = None
+    print("\n" + "!" * 60)
+    print("❌ STARTUP ERROR: Could not connect to Firestore.")
+    print("!" * 60)
+    print(f"Error details: {e}")
+    print("\nINSTRUCTIONS:")
+    print("   1. Check if the Google Cloud Project ID is correct.")
+    print("   2. Ensure the Service Account has 'Cloud Datastore User' or 'Firestore User' role.")
+    print("   3. If running locally, check your 'gcloud auth application-default login' credentials.")
+    sys.exit(1)
 
+# Verify collection access
+check_firestore_access(db)
 
 # --- Auth Decorator ---
 def check_auth(username, password):
