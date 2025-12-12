@@ -117,12 +117,12 @@ def rating_mode():
     unrated_videos = [doc.to_dict() for doc in query]
 
     if not unrated_videos:
-        return render_template('rating.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
+        return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
 
     # Select a random video from the fetched list
     video = random.choice(unrated_videos)
 
-    return render_template('rating.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
+    return render_template('rate.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
 
 
 @app.route('/play', methods=['GET', 'POST'])
