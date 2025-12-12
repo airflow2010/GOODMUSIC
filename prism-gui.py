@@ -2,6 +2,7 @@ import os
 import sys
 import random
 from functools import wraps
+from datetime import datetime, timezone
 
 from flask import Flask, render_template, request, redirect, url_for, Response
 from google.cloud import firestore
@@ -189,13 +190,25 @@ def rating_mode():
     
     unrated_videos = [doc.to_dict() for doc in query]
 
+    # --- Get total count of unrated videos ---
+    videos_left = 0
+    try:
+        # Use a projection query to count unrated videos.
+        # We select no fields (keys only) to minimize cost and latency.
+        # This avoids the limitations of count() with null filters.
+        docs = db.collection(COLLECTION_NAME).where("date_rated", "==", None).select([]).stream()
+        videos_left = sum(1 for _ in docs)
+    except Exception as e:
+        print(f"Error counting videos for 'rate' page: {e}")
+        videos_left = "N/A" # Display an error indicator
+
     if not unrated_videos:
-        return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
+        return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=0)
 
     # Select a random video from the fetched list
     video = random.choice(unrated_videos)
 
-    return render_template('rate.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
+    return render_template('rate.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=videos_left)
 
 
 @app.route('/play', methods=['GET', 'POST'])
@@ -266,6 +279,8 @@ def playing_mode():
         print(f"An error occurred while fetching/filtering videos: {e}")
         filtered_videos = []
 
+    videos_count = len(filtered_videos)
+
     # Select a random video from the filtered list
     video = None
     if filtered_videos:
@@ -290,7 +305,7 @@ def playing_mode():
         'exclude_rejected': exclude_rejected,
     }
 
-    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
+    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count)
 
 @app.route("/admin")
 @requires_auth

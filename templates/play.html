@@ -162,6 +162,7 @@
             <!-- Buttons -->
             <div class="button-group">
                 <button type="submit" class="save-button">Save & Next</button>
+                <span style="color: grey;">{{ videos_count }} videos selected by filter</span>
                 <button type="submit" class="next-button" formaction="{{ url_for('skip_video') }}">Skip & Next</button>
             </div>
         </form>
