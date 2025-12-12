@@ -48,7 +48,7 @@ def check_prerequisites():
         sys.exit(1)
 
     # Check for required templates
-    required_templates = ['rate.html', 'play.html']
+    required_templates = ['rate.html', 'play.html', 'admin.html']
     missing_templates = []
     for t in required_templates:
         if not os.path.exists(os.path.join('templates', t)):
@@ -291,6 +291,69 @@ def playing_mode():
     }
 
     return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
+
+@app.route("/admin")
+@requires_auth
+def admin_mode():
+    """
+    Secret admin page with database statistics.
+    """
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+
+    try:
+        # Fetch all documents to calculate stats
+        # Note: For very large collections, this might be slow and expensive.
+        docs = list(db.collection(COLLECTION_NAME).stream())
+        total_entries = len(docs)
+
+        rated_count = 0
+        favorite_count = 0
+        rejected_count = 0
+        genre_counts = {}
+
+        for doc in docs:
+            data = doc.to_dict()
+            if not data:
+                continue
+            
+            if data.get('date_rated'):
+                rated_count += 1
+            if data.get('favorite'):
+                favorite_count += 1
+            if data.get('rejected'):
+                rejected_count += 1
+            
+            genre = data.get('genre') or 'Unknown'
+            genre_counts[genre] = genre_counts.get(genre, 0) + 1
+
+        def calc_pct(count, total):
+            return round((count / total) * 100, 1) if total > 0 else 0.0
+
+        stats = {
+            'total_entries': total_entries,
+            'rated_count': rated_count,
+            'rated_pct': calc_pct(rated_count, total_entries),
+            'favorite_count': favorite_count,
+            'favorite_pct': calc_pct(favorite_count, total_entries),
+            'rejected_count': rejected_count,
+            'rejected_pct': calc_pct(rejected_count, total_entries),
+            'genre_stats': []
+        }
+
+        # Sort genres by count descending
+        sorted_genres = sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)
+        for genre, count in sorted_genres:
+            stats['genre_stats'].append({
+                'name': genre,
+                'count': count,
+                'pct': calc_pct(count, total_entries)
+            })
+
+        return render_template('admin.html', stats=stats)
+
+    except Exception as e:
+        return f"An error occurred: {e}", 500
 
 @app.route("/skip_video", methods=['POST'])
 @requires_auth
