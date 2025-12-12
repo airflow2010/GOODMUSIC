@@ -260,10 +260,19 @@ def predict_genre(model, video_id: str, video_title: str) -> str:
     if not model:
         return "Unknown"
     
+    allowed_genres = [
+        "Avant-garde & experimental", "Blues", "Classical", "Country",
+        "Easy listening", "Electronic", "Folk", "Hip hop", "Jazz",
+        "Pop", "R&B & soul", "Rock", "Metal", "Punk"
+    ]
+
     prompt = f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
     if video_title:
         prompt += f" and Title '{video_title}'"
-    prompt += ". Return ONLY the genre name (e.g. 'Rock', 'Pop', 'Jazz', 'Electronic'). If unknown, return 'Unknown'."
+    prompt += (
+        f". Return ONLY one of the following genre names: {', '.join(allowed_genres)}. "
+        "If the genre cannot be determined reliably, return 'Unknown'."
+    )
 
     try:
         response = model.generate_content(prompt)
@@ -308,6 +317,7 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         
         # 2. Predict Genre
         genre = predict_genre(model, video_id, title)
+        print(f"   '{title}' classified as '{genre}'")
         
         # 3. Prepare Data
         data = {
@@ -356,7 +366,7 @@ def main():
     # Vertex AI
     try:
         vertexai.init(project=project_id, location="us-central1", credentials=creds)
-        model = GenerativeModel("gemini-2.5-flash-lite")
+        model = GenerativeModel("gemini-2.5-flash")
     except Exception as e:
         print(f"⚠️ Vertex AI Init Error: {e}")
         model = None
