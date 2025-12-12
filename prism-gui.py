@@ -237,18 +237,25 @@ def playing_mode():
 
         candidate_videos = []
 
-        # --- Query 1: Get RATED videos that meet the criteria ---
-        # This query uses multiple range filters (>=), which requires a composite index.
-        rated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "!=", None)).where(
+        # --- Query 1: Get RATED videos that might meet the criteria ---
+        # Firestore only allows one range filter per query. We filter on music
+        # rating here and will filter on video rating in Python.
+        # We also can't combine a '!=' with a range filter, so we check for
+        # rated status in Python as well.
+        rated_query = base_query.where(
             filter=firestore.FieldFilter("rating_music", ">=", min_rating_music)
-        ).where(
-            filter=firestore.FieldFilter("rating_video", ">=", min_rating_video)
         )
         rated_docs = rated_query.stream()
-        candidate_videos.extend([doc.to_dict() for doc in rated_docs])
+
+        # Client-side filtering for the remaining conditions
+        for doc in rated_docs:
+            video_data = doc.to_dict()
+            if video_data.get("date_rated") and video_data.get("rating_video", 0) >= min_rating_video:
+                candidate_videos.append(video_data)
 
         # --- Query 2: Get UNRATED videos, if requested ---
         if include_unrated:
+            # This query only has equality filters from base_query and one for date_rated
             unrated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "==", None))
             unrated_docs = unrated_query.stream()
             candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
