@@ -307,6 +307,7 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
             continue
         
         print(f"   Processing new video: {video_id}")
+        print(f"      https://www.youtube.com/watch?v={video_id}")
         
         # 1. Get Title (optional but helpful for AI)
         metadata = get_video_metadata(youtube, video_id)
@@ -317,7 +318,7 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         
         # 2. Predict Genre
         genre = predict_genre(model, video_id, title)
-        print(f"   '{title}' classified as '{genre}'")
+        print(f"      '{title}' classified as '{genre}'")
         
         # 3. Prepare Data
         data = {
@@ -391,4 +392,8 @@ def main():
         process_post_to_firestore(db, model, youtube, post, html_text)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n🛑 Script interrupted by user. Exiting gracefully.")
+        sys.exit(0)
