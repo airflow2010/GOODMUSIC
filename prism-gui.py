@@ -11,11 +11,10 @@ load_dotenv()
 # --- Configuration ---
 # Get the project ID from the environment variable.
 # This is set automatically when running on Google Cloud.
-PROJECT_ID = os.environ.get("GCP_PROJECT")
+PROJECT_ID = os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT")
 if not PROJECT_ID:
-    # For local development, you can set this manually.
-    # Ensure you have run `gcloud auth application-default login`
-    PROJECT_ID = "goodmusic-470520"
+    # Ensure you have run `gcloud auth application-default login` or set the env var
+    raise ValueError("PROJECT_ID environment variable must be set.")
 
 COLLECTION_NAME = "musicvideos"
 

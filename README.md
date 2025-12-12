@@ -43,6 +43,28 @@ pip install -r requirements.txt
 - `client_secret.json` — OAuth client for YouTube Data API v3 (Desktop app).
 - `progress.json` — Created automatically to avoid duplicate playlist creation.
 
+### Prepare Google Cloud Secrets
+To secure the Flask UI in Cloud Run without exposing credentials in deployment commands:
+1. Enable Secret Manager: `gcloud services enable secretmanager.googleapis.com`
+2. Create secrets for the UI login:
+   ```bash
+   printf "your-username" | gcloud secrets create prism-auth-username --data-file=-
+   printf "your-password" | gcloud secrets create prism-auth-password --data-file=-
+   printf "your-project-id" | gcloud secrets create prism-auth-projectid --data-file=-
+   ```
+3. Grant the Compute Engine default service account access to the secrets (replace `<PROJECT_NUMBER>` with your project number):
+   ```bash
+   gcloud secrets add-iam-policy-binding prism-auth-username \
+       --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
+       --role="roles/secretmanager.secretAccessor"
+   gcloud secrets add-iam-policy-binding prism-auth-password \
+       --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
+       --role="roles/secretmanager.secretAccessor"
+   gcloud secrets add-iam-policy-binding prism-auth-projectid \
+       --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
+       --role="roles/secretmanager.secretAccessor"
+   ```
+
 ## Data model (Firestore `musicvideos`)
 Each document key is the YouTube `video_id` and stores fields like:
 - `title`, `source` (Substack URL), `genre`, `musical_value`, `video_value`
@@ -101,7 +123,7 @@ gcloud run deploy prism-gui \
   --platform managed \
   --region europe-west4 \
   --allow-unauthenticated \
-  --set-env-vars="AUTH_USERNAME=<USER>,AUTH_PASSWORD=<PASSWORD>,GCP_PROJECT=<PROJECT_ID>"
+  --set-secrets="AUTH_USERNAME=prism-auth-username:latest,AUTH_PASSWORD=prism-auth-password:latest,PROJECT_ID=prism-auth-projectid:latest"
 ```
 
 ## Operational tips
