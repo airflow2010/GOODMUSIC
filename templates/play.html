@@ -162,7 +162,7 @@
             <!-- Buttons -->
             <div class="button-group">
                 <button type="submit" class="save-button">Save & Next</button>
-                <a href="{{ url_for('playing_mode', **filters) }}" class="button-link next-button">Skip & Next</a>
+                <button type="submit" class="next-button" formaction="{{ url_for('skip_video') }}">Skip & Next</button>
             </div>
         </form>
 

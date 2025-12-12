@@ -292,6 +292,23 @@ def playing_mode():
 
     return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS)
 
+@app.route("/skip_video", methods=['POST'])
+@requires_auth
+def skip_video():
+    """
+    Skips the current video but preserves the filter settings.
+    """
+    # Re-apply filters for the next video by redirecting with query parameters
+    filters = {
+        'min_rating_music': request.form.get('min_rating_music_hidden'),
+        'min_rating_video': request.form.get('min_rating_video_hidden'),
+        'genre_filter': request.form.get('genre_filter_hidden'),
+        'favorite_only': request.form.get('favorite_only_hidden'),
+        'include_unrated': request.form.get('include_unrated_hidden'),
+        'exclude_rejected': request.form.get('exclude_rejected_hidden')
+    }
+    return redirect(url_for('playing_mode', **{k: v for k, v in filters.items() if v is not None}))
+
 @app.route("/save_rating/<string:video_id>", methods=['POST'])
 @requires_auth
 def save_rating(video_id):
