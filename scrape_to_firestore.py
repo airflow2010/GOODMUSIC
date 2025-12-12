@@ -366,7 +366,7 @@ def main():
     
     # Vertex AI
     try:
-        vertexai.init(project=project_id, location="us-central1", credentials=creds)
+        vertexai.init(project=project_id, location="europe-west4", credentials=creds)
         model = GenerativeModel("gemini-2.5-flash")
     except Exception as e:
         print(f"⚠️ Vertex AI Init Error: {e}")
