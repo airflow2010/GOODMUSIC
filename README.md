@@ -73,6 +73,29 @@ Each document key is the YouTube `video_id` and stores fields like:
 
 ## Scripts
 
+### 0) Build YouTube playlists (deprecated)
+
+`scrape_to_YT-playlists.py` creates playlists from Substack or a local HTML file; remembers processed posts in `progress.json`.
+
+```bash
+# From Substack archive
+python scrape_to_YT-playlists.py --substack https://goodmusic.substack.com/archive \
+  --privacy private --limit 10 --sleep 0.2
+
+# From local HTML
+python scrape_to_YT-playlists.py path/to/file.html --privacy unlisted
+```
+
+Flags:
+
+- `--privacy private|unlisted|public`
+- `--dry-run` to inspect without creating playlists
+- `--limit` to cap posts/videos
+- `--sleep` to throttle API calls
+  Auth:
+- Requires `client_secret.json`; first run writes `token.pickle`.
+- Enable YouTube Data API v3 in your project.
+
 ### 1) Scrape Substack to Firestore
 `scrape_to_firestore.py` fetches posts, extracts video IDs, fetches YouTube metadata, lets Vertex AI guess genre, and writes new docs.
 ```bash
@@ -84,25 +107,6 @@ Notes:
 - Uses ADC (`gcloud auth application-default login`) and `GCP_PROJECT`/`--project`.
 - Needs `client_secret.json` for YouTube metadata; falls back gracefully if missing.
 - Vertex AI genre prediction is optional; if unavailable, genre defaults to `Unknown`.
-
-### 1b) Build YouTube playlists (deprecated)
-`scrape_to_YT-playlists.py` creates playlists from Substack or a local HTML file; remembers processed posts in `progress.json`.
-```bash
-# From Substack archive
-python scrape_to_YT-playlists.py --substack https://goodmusic.substack.com/archive \
-  --privacy private --limit 10 --sleep 0.2
-
-# From local HTML
-python scrape_to_YT-playlists.py path/to/file.html --privacy unlisted
-```
-Flags:
-- `--privacy private|unlisted|public`
-- `--dry-run` to inspect without creating playlists
-- `--limit` to cap posts/videos
-- `--sleep` to throttle API calls
-Auth:
-- Requires `client_secret.json`; first run writes `token.pickle`.
-- Enable YouTube Data API v3 in your project.
 
 ### 2a) Run the Flask UI locally
 `prism-gui.py` serves:
@@ -116,7 +120,7 @@ python prism-gui.py
 ```
 For production you can run `gunicorn prism-gui:app`.
 
-### 3) Run the Flask UI in Google Cloud
+### 2b) Run the Flask UI in Google Cloud
 ```bash
 gcloud run deploy prism-gui \
   --source . \
