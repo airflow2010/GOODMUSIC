@@ -17,13 +17,16 @@ import google.auth
 from google.cloud import firestore
 from google.api_core import exceptions
 import vertexai
-from vertexai.generative_models import GenerativeModel
+from vertexai.generative_models import GenerativeModel, Part
 
 # YouTube API
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
+
+# Media downloading
+import yt_dlp
 
 # ====== Configuration ======
 COLLECTION_NAME = "musicvideos"
@@ -255,6 +258,39 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | 
         print(f"⚠️ YouTube API Error for {video_id}: {e}")
     return "", None
 
+def download_audio_for_analysis(video_id: str) -> str | None:
+    """Downloads the audio of a YouTube video to a temporary file for AI analysis."""
+    # Use /tmp which is generally writable (including in Cloud Run)
+    output_path = f"/tmp/{video_id}.m4a"
+    
+    # Clean up previous run if exists
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio', # Prefer m4a (AAC) to avoid ffmpeg conversion if possible
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'max_filesize': 25 * 1024 * 1024, # Limit to 25MB to respect API quotas
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        
+        if os.path.exists(output_path):
+            return output_path
+    except Exception as e:
+        # It's common for some videos to be unavailable or age-gated
+        print(f"      ⚠️ Audio download skipped/failed: {e}")
+    
+    return None
+
 def predict_genre(model, video_id: str, video_title: str) -> str:
     """Uses Gemini to predict genre based on ID and Title."""
     if not model:
@@ -266,20 +302,45 @@ def predict_genre(model, video_id: str, video_title: str) -> str:
         "Pop", "R&B & soul", "Rock", "Metal", "Punk"
     ]
 
-    prompt = f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
+    # 1. Try to download audio
+    audio_path = download_audio_for_analysis(video_id)
+    parts = []
+
+    # 2. Prepare the prompt
+    prompt_text = f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
     if video_title:
-        prompt += f" and Title '{video_title}'"
-    prompt += (
+        prompt_text += f" and Title '{video_title}'"
+    
+    if audio_path:
+        print(f"      🎵 Analyzing actual audio content...")
+        prompt_text += ". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre."
+        try:
+            with open(audio_path, "rb") as f:
+                audio_data = f.read()
+            # Pass the audio data directly to the model
+            parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
+        except Exception as e:
+            print(f"      ⚠️ Error reading audio file: {e}")
+    
+    prompt_text += (
         f". Return ONLY one of the following genre names: {', '.join(allowed_genres)}. "
         "If the genre cannot be determined reliably, return 'Unknown'."
     )
+    parts.append(prompt_text)
 
     try:
-        response = model.generate_content(prompt)
+        response = model.generate_content(parts)
         return response.text.strip()
     except Exception as e:
         print(f"⚠️ Gemini Error: {e}")
         return "Unknown"
+    finally:
+        # Clean up the temporary audio file
+        if audio_path and os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
 
 def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
     _, video_ids = extract_from_html_text(html_text)
