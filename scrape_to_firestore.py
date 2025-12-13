@@ -4,6 +4,7 @@ import html as htmllib
 import os
 import re
 import time
+import json
 import pickle
 import sys
 from datetime import datetime, timezone
@@ -258,62 +259,31 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | 
         print(f"⚠️ YouTube API Error for {video_id}: {e}")
     return "", None
 
-def download_audio_for_analysis(video_id: str) -> str | None:
-    """Downloads the audio of a YouTube video to a temporary file for AI analysis."""
-    # Use /tmp which is generally writable (including in Cloud Run)
-    output_path = f"/tmp/{video_id}.m4a"
-    
-    # Clean up previous run if exists
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
-
-    ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio', # Prefer m4a (AAC) to avoid ffmpeg conversion if possible
-        'outtmpl': output_path,
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'max_filesize': 25 * 1024 * 1024, # Limit to 25MB to respect API quotas
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-        
-        if os.path.exists(output_path):
-            return output_path
-    except Exception as e:
-        # It's common for some videos to be unavailable or age-gated
-        print(f"      ⚠️ Audio download skipped/failed: {e}")
-    
-    return None
-
-def predict_genre(model, video_id: str, video_title: str) -> str:
-    """Uses Gemini to predict genre based on ID and Title."""
+def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str]:
+    """Uses Gemini to predict genre, confidence, and reasoning."""
     if not model:
-        return "Unknown"
+        return "Unknown", 0, "AI model not available."
     
     allowed_genres = [
         "Avant-garde & experimental", "Blues", "Classical", "Country",
         "Easy listening", "Electronic", "Folk", "Hip hop", "Jazz",
         "Pop", "R&B & soul", "Rock", "Metal", "Punk"
     ]
-
+    
     # 1. Try to download audio
     audio_path = download_audio_for_analysis(video_id)
     parts = []
 
     # 2. Prepare the prompt
-    prompt_text = f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
+    prompt_parts = [
+        f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
+    ]
     if video_title:
-        prompt_text += f" and Title '{video_title}'"
+        prompt_parts.append(f" and Title '{video_title}'")
     
     if audio_path:
         print(f"      🎵 Analyzing actual audio content...")
-        prompt_text += ". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre."
+        prompt_parts.append(". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre.")
         try:
             with open(audio_path, "rb") as f:
                 audio_data = f.read()
@@ -321,19 +291,46 @@ def predict_genre(model, video_id: str, video_title: str) -> str:
             parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
         except Exception as e:
             print(f"      ⚠️ Error reading audio file: {e}")
+
+    prompt_parts.append("\n\nYour response must be a JSON object with the following three keys:")
+    prompt_parts.append(f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. If the genre cannot be determined reliably, use "Unknown".')
+    prompt_parts.append('2. "fidelity": An integer between 0 and 100 representing your confidence in the genre classification. 100 means you are absolutely certain.')
+    prompt_parts.append('3. "remarks": A short string (1-2 sentences) explaining your reasoning for the genre classification.')
+    prompt_parts.append('\nExample response:\n{\n  "genre": "Rock",\n  "fidelity": 85,\n  "remarks": "The song features prominent electric guitars, a strong backbeat, and a classic rock vocal style."\n}')
     
-    prompt_text += (
-        f". Return ONLY one of the following genre names: {', '.join(allowed_genres)}. "
-        "If the genre cannot be determined reliably, return 'Unknown'."
-    )
+    prompt_text = "".join(prompt_parts)
     parts.append(prompt_text)
 
     try:
         response = model.generate_content(parts)
-        return response.text.strip()
+        # Clean up response text before parsing
+        cleaned_text = response.text.strip()
+        if cleaned_text.startswith("```json"):
+            cleaned_text = cleaned_text[7:]
+        if cleaned_text.endswith("```"):
+            cleaned_text = cleaned_text[:-3]
+        
+        data = json.loads(cleaned_text)
+        genre = data.get("genre", "Unknown")
+        fidelity = data.get("fidelity", 0)
+        remarks = data.get("remarks", "")
+        
+        # Basic validation
+        if genre not in allowed_genres and genre != "Unknown":
+            genre = "Unknown"
+        if not isinstance(fidelity, int) or not (0 <= fidelity <= 100):
+            fidelity = 0
+        if not isinstance(remarks, str):
+            remarks = ""
+            
+        return genre, fidelity, remarks
+
+    except (json.JSONDecodeError, AttributeError, KeyError) as e:
+        print(f"      ⚠️ Gemini response parsing error: {e}")
+        return "Unknown", 0, "AI response was not in the expected JSON format."
     except Exception as e:
-        print(f"⚠️ Gemini Error: {e}")
-        return "Unknown"
+        print(f"      ⚠️ Gemini Error: {e}")
+        return "Unknown", 0, str(e)
     finally:
         # Clean up the temporary audio file
         if audio_path and os.path.exists(audio_path):
@@ -378,8 +375,10 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         title, date_youtube = metadata
         
         # 2. Predict Genre
-        genre = predict_genre(model, video_id, title)
-        print(f"      '{title}' classified as '{genre}'")
+        genre, fidelity, remarks = predict_genre(model, video_id, title)
+        print(f"      AI Genre: '{genre}'")
+        print(f"      AI Fidelity: {fidelity}%")
+        print(f"      AI Remarks: {remarks}")
         
         # 3. Prepare Data
         data = {
@@ -388,6 +387,8 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
             "rating_music": 3,
             "rating_video": 3,
             "genre": genre,
+            "genre_ai_fidelity": fidelity,
+            "genre_ai_remarks": remarks,
             "favorite": False,
             "rejected": False,
             "title": title,
@@ -402,6 +403,9 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         
         # Rate limit to be nice to APIs
         time.sleep(0.5)
+
+        # Newline for readability
+        print()
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape music videos to Firestore.")
