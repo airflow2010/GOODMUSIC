@@ -259,6 +259,39 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | 
         print(f"⚠️ YouTube API Error for {video_id}: {e}")
     return "", None
 
+def download_audio_for_analysis(video_id: str) -> str | None:
+    """Downloads the audio of a YouTube video to a temporary file for AI analysis."""
+    # Use /tmp which is generally writable (including in Cloud Run)
+    output_path = f"/tmp/{video_id}.m4a"
+    
+    # Clean up previous run if exists
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio', # Prefer m4a (AAC) to avoid ffmpeg conversion if possible
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'max_filesize': 25 * 1024 * 1024, # Limit to 25MB to respect API quotas
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        
+        if os.path.exists(output_path):
+            return output_path
+    except Exception as e:
+        # It's common for some videos to be unavailable or age-gated
+        print(f"      ⚠️ Audio download skipped/failed: {e}")
+    
+    return None
+
 def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str]:
     """Uses Gemini to predict genre, confidence, and reasoning."""
     if not model:
