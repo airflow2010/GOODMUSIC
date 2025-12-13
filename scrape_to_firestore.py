@@ -339,10 +339,10 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
             except OSError:
                 pass
 
-def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
+def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0) -> int:
     _, video_ids = extract_from_html_text(html_text)
     if not video_ids:
-        return
+        return 0
     
     post_url = post["url"]
     # Prefer archive JSON date, fall back to HTML meta
@@ -350,7 +350,11 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
 
     print(f"   Found {len(video_ids)} videos in post.")
     
+    added_count = 0
     for video_id in video_ids:
+        if max_new_entries > 0 and added_count >= max_new_entries:
+            break
+
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
         
         # Check if exists to avoid re-processing and AI costs
@@ -400,18 +404,22 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str):
         
         # 4. Save
         doc_ref.set(data)
+        added_count += 1
         
         # Rate limit to be nice to APIs
         time.sleep(0.5)
 
         # Newline for readability
         print()
+    
+    return added_count
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape music videos to Firestore.")
     parser.add_argument("--substack", default="https://goodmusic.substack.com/archive", help="Substack Archive URL")
     parser.add_argument("--project", help="Google Cloud Project ID")
-    parser.add_argument("--limit", type=int, default=0, help="Limit posts to process (0 for all)")
+    parser.add_argument("--limit-substack-posts", type=int, default=0, help="Limit posts to process (0 for all)")
+    parser.add_argument("--limit-new-db-entries", type=int, default=0, help="Limit new DB entries to add (0 for all)")
     args = parser.parse_args()
 
     # 1. Auth & Clients
@@ -446,15 +454,26 @@ def main():
     print(f"📥 Fetching posts from {args.substack}...")
     posts = fetch_substack_posts_json(args.substack, limit_per_page=20)
     
-    if args.limit > 0:
-        posts = posts[:args.limit]
+    if args.limit_substack_posts > 0:
+        posts = posts[:args.limit_substack_posts]
 
     # 3. Process
     print(f"🔄 Processing {len(posts)} posts...")
+    total_new_entries = 0
     for i, post in enumerate(posts):
+        if args.limit_new_db_entries > 0 and total_new_entries >= args.limit_new_db_entries:
+            print(f"🛑 Limit of {args.limit_new_db_entries} new DB entries reached.")
+            break
+
         print(f"[{i+1}/{len(posts)}] Processing {post['title']}...")
         html_text = fetch_post_html(post["url"])
-        process_post_to_firestore(db, model, youtube, post, html_text)
+        
+        remaining_limit = 0
+        if args.limit_new_db_entries > 0:
+            remaining_limit = args.limit_new_db_entries - total_new_entries
+
+        added = process_post_to_firestore(db, model, youtube, post, html_text, max_new_entries=remaining_limit)
+        total_new_entries += added
 
 if __name__ == "__main__":
     try:
