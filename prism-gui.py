@@ -224,8 +224,8 @@ def playing_mode():
     # Filters can come from a POST (submitting the filter form) or GET (direct link, or redirect after save)
     source = request.form if request.method == 'POST' else request.args
 
-    min_rating_music = source.get('min_rating_music', 1, type=int)
-    min_rating_video = source.get('min_rating_video', 1, type=int)
+    min_rating_music = source.get('min_rating_music', 3, type=int)
+    min_rating_video = source.get('min_rating_video', 3, type=int)
     genre_filter = source.get('genre_filter', 'All')
 
     if request.method == 'POST':
