@@ -279,12 +279,21 @@ def playing_mode():
         print(f"An error occurred while fetching/filtering videos: {e}")
         filtered_videos = []
 
+    # Sort filtered videos for the playlist
+    filtered_videos.sort(key=lambda x: (str(x.get('artist') or '').lower(), str(x.get('track') or '').lower()))
+
     videos_count = len(filtered_videos)
 
-    # Select a random video from the filtered list
+    # Select video
     video = None
+    selected_video_id = source.get('selected_video_id')
+
     if filtered_videos:
-        video = random.choice(filtered_videos)
+        if selected_video_id:
+            video = next((v for v in filtered_videos if v.get('video_id') == selected_video_id), None)
+        
+        if not video:
+            video = random.choice(filtered_videos)
 
     # --- Fetch All Genres for Dropdowns ---
     try:
@@ -305,7 +314,7 @@ def playing_mode():
         'exclude_rejected': exclude_rejected,
     }
 
-    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count)
+    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count, playlist=filtered_videos)
 
 @app.route("/admin")
 @requires_auth

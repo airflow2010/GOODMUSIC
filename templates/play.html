@@ -96,6 +96,18 @@
                 <button type="submit" class="next-button">Apply</button>
             </div>
         </div>
+
+        <div class="filter-row" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 15px;">
+            <label for="selected_video_id">Resulting Playlist:</label>
+            <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()">
+                <option value="">-- Random / Shuffle --</option>
+                {% for v in playlist %}
+                    <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
+                        {{ v.artist }} ({{ v.track }})
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
     </form>
 
     <hr style="border-color: #333; margin: 30px 0;">
