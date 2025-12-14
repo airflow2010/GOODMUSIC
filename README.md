@@ -14,24 +14,18 @@ Tools for collecting YouTube music videos from Substack, seeding a Firestore cat
   </tr>
 </table>
 
-
-
-### rate
-
-<img src="prism-ss-rate.png" alt="rate videos" style="width:75%" align="left">
-
-### filter & play
-
-<img src="prism-ss-play.png" alt="filter and play videos" style="width:75%" align="left">
-
-
 ## Concept
 - Scrape Substack posts, extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection).
 - Optionally let Vertex AI guess the genre.
 - Build YouTube playlists automatically from Substack archives or local HTML.
 - Rate and filter the catalog in a browser (play mode for discovery, rate mode for unrated items).
 
+## Upcoming features
+
+Import/Export from/to prism to/from YouTube-Playlist
+
 ## Repository layout
+
 - `prism-gui.py` — Flask app that renders the rating (`/rate`) and play (`/play`) pages using Firestore data.
 - `scrape_to_firestore.py` — Scrapes Substack posts, pulls YouTube metadata, predicts genres/artist/track (Vertex AI), and writes new videos to Firestore.
 - `scrape_to_YT-playlists.py` — Creates YouTube playlists from Substack archives or local HTML; tracks progress in `progress.json`. This script is deprecated and only included for historical reasons.
@@ -129,6 +123,8 @@ Flags:
   Auth:
 - Requires `client_secret.json`; first run writes `token.pickle`.
 - Enable YouTube Data API v3 in your project.
+
+Note: This was the first iteration of my work on making GOODMUSIC better. I soon found out that there was no way around a "real" database where I can rate/classify the videos. This is what the other stuff is about.
 
 ### 1) Scrape Substack to Firestore
 `scrape_to_firestore.py` fetches posts, extracts video IDs, fetches YouTube metadata, lets Vertex AI guess genre/artist/track, and writes new docs.
