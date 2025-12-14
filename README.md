@@ -1,6 +1,6 @@
 # GOODMUSIC prism
 
-Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, creating YouTube playlists, and rating/filtering videos via a small Flask UI.
+Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, and rating/filtering videos via a small Flask UI, export collection to YouTube-playlists
 
 ## Screenshots
 <table>
@@ -15,10 +15,11 @@ Tools for collecting YouTube music videos from Substack, seeding a Firestore cat
 </table>
 
 ## Concept
+- Build YouTube playlists automatically from Substack archives or local HTML (deprecated)
 - Scrape Substack posts, extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection).
 - Optionally let Vertex AI guess the genre.
-- Build YouTube playlists automatically from Substack archives or local HTML.
 - Rate and filter the catalog in a browser (play mode for discovery, rate mode for unrated items).
+- Export the desired selection (by filter) to YouTube-Playlist (roadmap)
 
 ## Upcoming features
 
