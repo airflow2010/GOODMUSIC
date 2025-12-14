@@ -1,6 +1,14 @@
-# GOODMUSIC PRISM Toolkit
+# GOODMUSIC prism
 
 Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, creating YouTube playlists, and rating/filtering videos via a small Flask UI.
+
+## Screenshots
+### rate
+<img src="prism-ss-rate.png" alt="rate videos" style="width:75%" align="left">
+
+### filter & play
+<img src="prism-ss-play.png" alt="filter and play videos" style="width:75%" align="left">
+
 
 ## Concept
 - Scrape Substack posts, extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection).
@@ -39,7 +47,17 @@ pip install -r requirements.txt
   export GCP_PROJECT=<your-project-id>
   ```
 
+* Set username/password for the UI
+
+  ```bash
+  export AUTH_USERNAME=<your-username>
+  export AUTH_PASSWORD=<your-password>
+  ```
+
+* You can set all of the above env-variables in an .env file permanently
+
 ### Required files
+
 - `client_secret.json` — OAuth client for YouTube Data API v3 (Desktop app).
 - `progress.json` — Created automatically to avoid duplicate playlist creation.
 
@@ -111,18 +129,20 @@ Notes:
 - Needs `client_secret.json` for YouTube metadata; falls back gracefully if missing.
 - Vertex AI genre prediction is optional; if unavailable, genre defaults to `Unknown`.
 
-### 2a) Run the Flask UI locally
+### 2) Flask UI
+
 `prism-gui.py` serves:
 
 - `/rate` — shows unrated videos (`musical_value == 0`) to rate.
 - `/play` — lets you filter (genre, min ratings, favorites, unrated inclusion, rejected exclusion) and play/rate.
+- `/admin` — hidden (has to be entered manually), shows some statistics
+
+### 2a) Run the Flask UI locally
+
 ```bash
-export GCP_PROJECT=<your-project-id>
 python prism-gui.py
 # open http://127.0.0.1:8080
 ```
-For production you can run `gunicorn prism-gui:app`.
-
 ### 2b) Run the Flask UI in Google Cloud
 ```bash
 gcloud run deploy prism-gui \
@@ -133,7 +153,10 @@ gcloud run deploy prism-gui \
   --set-secrets="AUTH_USERNAME=prism-auth-username:latest,AUTH_PASSWORD=prism-auth-password:latest,PROJECT_ID=prism-auth-projectid:latest"
 ```
 
+You will get a dynamic URL which you can then use to access the app. You can map a custom domain to the app (in GCC/Cloud Run/Domain Mappings).
+
 ## Operational tips
+
 - Quotas: YouTube inserts and playlist creation consume quota; the playlist script stops and cleans up on `quotaExceeded`.
 - Progress: `progress.json` prevents duplicate playlists; delete it if you want to rebuild everything.
 - Tokens: remove `token.pickle` to force a new YouTube OAuth flow.
