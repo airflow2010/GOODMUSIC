@@ -3,10 +3,25 @@
 Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, creating YouTube playlists, and rating/filtering videos via a small Flask UI.
 
 ## Screenshots
+<table>
+  <tr>
+    <th>rate</th>
+    <th>play</th>
+  </tr>
+  <tr>
+    <td valign="top"><img src="/home/airflow/Documents/python-projekte/GOODMUSIC/prism-ss-rate.png" alt="prism-ss-rate"></td>
+    <td valign="top"><img src="/home/airflow/Documents/python-projekte/GOODMUSIC/prism-ss-play.png" alt="prism-ss-play"></td>
+  </tr>
+</table>
+
+
+
 ### rate
+
 <img src="prism-ss-rate.png" alt="rate videos" style="width:75%" align="left">
 
 ### filter & play
+
 <img src="prism-ss-play.png" alt="filter and play videos" style="width:75%" align="left">
 
 
