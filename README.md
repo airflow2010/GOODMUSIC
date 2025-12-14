@@ -10,7 +10,7 @@ Tools for collecting YouTube music videos from Substack, seeding a Firestore cat
 
 ## Repository layout
 - `prism-gui.py` — Flask app that renders the rating (`/rate`) and play (`/play`) pages using Firestore data.
-- `scrape_to_firestore.py` — Scrapes Substack posts, pulls YouTube metadata, predicts genres (Vertex AI), and writes new videos to Firestore.
+- `scrape_to_firestore.py` — Scrapes Substack posts, pulls YouTube metadata, predicts genres/artist/track (Vertex AI), and writes new videos to Firestore.
 - `scrape_to_YT-playlists.py` — Creates YouTube playlists from Substack archives or local HTML; tracks progress in `progress.json`. This script is deprecated and only included for historical reasons.
 - `templates/` — HTML templates for the Flask UI.
 - `requirements.txt` — Python dependencies.
@@ -67,7 +67,8 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
 
 ## Data model (Firestore `musicvideos`)
 Each document key is the YouTube `video_id` and stores fields like:
-- `title`, `source` (Substack URL), `genre`, `musical_value`, `video_value`
+- `title`, `source` (Substack URL), `genre`, `rating_music`, `rating_video`
+- `artist`, `track`, `ai_model`, `genre_ai_fidelity`, `genre_ai_remarks`
 - `favorite` (bool), `rejected` (bool)
 - `date_prism`, `date_substack`, `date_youtube`, `date_rated`
 
@@ -97,11 +98,13 @@ Flags:
 - Enable YouTube Data API v3 in your project.
 
 ### 1) Scrape Substack to Firestore
-`scrape_to_firestore.py` fetches posts, extracts video IDs, fetches YouTube metadata, lets Vertex AI guess genre, and writes new docs.
+`scrape_to_firestore.py` fetches posts, extracts video IDs, fetches YouTube metadata, lets Vertex AI guess genre/artist/track, and writes new docs.
 ```bash
-python scrape_to_firestore.py --substack https://goodmusic.substack.com/archive \
-  --project <your-project-id> \
-  --limit 50     # optional
+python scrape_to_firestore.py
+  --substack: The URL of the Substack archive to scrape. Defaults to https://goodmusic.substack.com/archive.
+  --project: The Google Cloud Project ID. If not provided, it attempts to infer it from the environment (ADC).
+  --limit-substack-posts: Limits the number of Substack posts (articles) to process. Defaults to 0 (process all found posts). Useful for testing or incremental updates.
+  --limit-new-db-entries: Limits the number of new videos added to Firestore in this run. Defaults to 0 (no limit). Useful to control costs or batch updates.
 ```
 Notes:
 - Uses ADC (`gcloud auth application-default login`) and `GCP_PROJECT`/`--project`.

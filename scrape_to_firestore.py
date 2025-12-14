@@ -292,10 +292,10 @@ def download_audio_for_analysis(video_id: str) -> str | None:
     
     return None
 
-def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str]:
-    """Uses Gemini to predict genre, confidence, and reasoning."""
+def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str, str, str]:
+    """Uses Gemini to predict genre, confidence, reasoning, artist, and track."""
     if not model:
-        return "Unknown", 0, "AI model not available."
+        return "Unknown", 0, "AI model not available.", "", ""
     
     allowed_genres = [
         "Avant-garde & experimental", "Blues", "Classical", "Country",
@@ -325,11 +325,13 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
         except Exception as e:
             print(f"      ⚠️ Error reading audio file: {e}")
 
-    prompt_parts.append("\n\nYour response must be a JSON object with the following three keys:")
+    prompt_parts.append("\n\nYour response must be a JSON object with the following keys:")
     prompt_parts.append(f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. If the genre cannot be determined reliably, use "Unknown".')
     prompt_parts.append('2. "fidelity": An integer between 0 and 100 representing your confidence in the genre classification. 100 means you are absolutely certain.')
     prompt_parts.append('3. "remarks": A short string (1-2 sentences) explaining your reasoning for the genre classification.')
-    prompt_parts.append('\nExample response:\n{\n  "genre": "Rock",\n  "fidelity": 85,\n  "remarks": "The song features prominent electric guitars, a strong backbeat, and a classic rock vocal style."\n}')
+    prompt_parts.append('4. "artist": A string containing the name of the artist or band.')
+    prompt_parts.append('5. "track": A string containing the name of the song or track.')
+    prompt_parts.append('\nExample response:\n{\n  "genre": "Rock",\n  "fidelity": 85,\n  "remarks": "The song features prominent electric guitars, a strong backbeat, and a classic rock vocal style.",\n  "artist": "The Beatles",\n  "track": "Hey Jude"\n}')
     
     prompt_text = "".join(prompt_parts)
     parts.append(prompt_text)
@@ -347,6 +349,8 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
         genre = data.get("genre", "Unknown")
         fidelity = data.get("fidelity", 0)
         remarks = data.get("remarks", "")
+        artist = data.get("artist", "")
+        track = data.get("track", "")
         
         # Basic validation
         if genre not in allowed_genres and genre != "Unknown":
@@ -355,15 +359,19 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
             fidelity = 0
         if not isinstance(remarks, str):
             remarks = ""
+        if not isinstance(artist, str):
+            artist = ""
+        if not isinstance(track, str):
+            track = ""
             
-        return genre, fidelity, remarks
+        return genre, fidelity, remarks, artist, track
 
     except (json.JSONDecodeError, AttributeError, KeyError) as e:
         print(f"      ⚠️ Gemini response parsing error: {e}")
-        return "Unknown", 0, "AI response was not in the expected JSON format."
+        return "Unknown", 0, "AI response was not in the expected JSON format.", "", ""
     except Exception as e:
         print(f"      ⚠️ Gemini Error: {e}")
-        return "Unknown", 0, str(e)
+        return "Unknown", 0, str(e), "", ""
     finally:
         # Clean up the temporary audio file
         if audio_path and os.path.exists(audio_path):
@@ -372,7 +380,7 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
             except OSError:
                 pass
 
-def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0) -> int:
+def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0, model_name: str = "unknown") -> int:
     _, video_ids = extract_from_html_text(html_text)
     if not video_ids:
         return 0
@@ -412,10 +420,12 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, ma
         title, date_youtube = metadata
         
         # 2. Predict Genre
-        genre, fidelity, remarks = predict_genre(model, video_id, title)
+        genre, fidelity, remarks, artist, track = predict_genre(model, video_id, title)
         print(f"      AI Genre: '{genre}'")
         print(f"      AI Fidelity: {fidelity}%")
         print(f"      AI Remarks: {remarks}")
+        print(f"      AI Artist: {artist}")
+        print(f"      AI Track: {track}")
         
         # 3. Prepare Data
         data = {
@@ -426,6 +436,9 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, ma
             "genre": genre,
             "genre_ai_fidelity": fidelity,
             "genre_ai_remarks": remarks,
+            "ai_model": model_name,
+            "artist": artist,
+            "track": track,
             "favorite": False,
             "rejected": False,
             "title": title,
@@ -471,9 +484,10 @@ def main():
     db = firestore.Client(project=project_id, credentials=creds)
     
     # Vertex AI
+    model_name = "gemini-2.5-flash"
     try:
         vertexai.init(project=project_id, location="europe-west4", credentials=creds)
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel(model_name)
     except Exception as e:
         print(f"⚠️ Vertex AI Init Error: {e}")
         model = None
@@ -505,7 +519,7 @@ def main():
         if args.limit_new_db_entries > 0:
             remaining_limit = args.limit_new_db_entries - total_new_entries
 
-        added = process_post_to_firestore(db, model, youtube, post, html_text, max_new_entries=remaining_limit)
+        added = process_post_to_firestore(db, model, youtube, post, html_text, max_new_entries=remaining_limit, model_name=model_name)
         total_new_entries += added
 
 if __name__ == "__main__":
