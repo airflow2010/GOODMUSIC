@@ -1,6 +1,8 @@
 # GOODMUSIC prism
 
-Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, and rating/filtering videos via a small Flask UI, export collection to YouTube-playlists
+Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, and rating/filtering videos via a small Flask UI & export collection to YouTube-playlists.
+
+Goal: Create your own MTV! 🎶
 
 ## Screenshots
 <table>
