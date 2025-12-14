@@ -99,14 +99,22 @@
 
         <div class="filter-row" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 15px;">
             <label for="selected_video_id">Resulting Playlist:</label>
-            <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()">
-                <option value="">-- Random / Shuffle --</option>
-                {% for v in playlist %}
-                    <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
-                        {{ v.artist }} ({{ v.track }})
-                    </option>
-                {% endfor %}
-            </select>
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()" style="flex-grow: 1;">
+                    <option value="">-- Random / Shuffle --</option>
+                    {% for v in playlist %}
+                        <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
+                            {{ v.artist }} ({{ v.track }})
+                        </option>
+                    {% endfor %}
+                </select>
+                <button type="button" onclick="toggleExport()" class="next-button" style="background-color: #ff9800; width: auto;">Export</button>
+            </div>
+        </div>
+
+        <div id="export-section" style="display: none; background-color: #333; padding: 15px; margin-top: 10px; border-radius: 4px; border: 1px solid #555;">
+            <!-- Content loaded via JS -->
+            <p>Loading YouTube info...</p>
         </div>
     </form>
 
@@ -114,6 +122,10 @@
 
     {% if video %}
         <h2>{{ video.title }}</h2>
+
+        {% if export_message %}
+            <div style="background-color: #2a2a2a; border-left: 5px solid #ff9800; padding: 10px; margin-bottom: 20px;">{{ export_message }}</div>
+        {% endif %}
 
         <!-- YouTube Player -->
         <div id="player-error" style="display: none; color: red; margin-bottom: 15px;"></div>
@@ -262,6 +274,88 @@
             minRatingVideoSlider.oninput = function() { minRatingVideoDisplay.textContent = this.value; }
         }
     });
+
+    function toggleExport() {
+        const sec = document.getElementById('export-section');
+        if (sec.style.display === 'none') {
+            sec.style.display = 'block';
+            loadYoutubeInfo();
+        } else {
+            sec.style.display = 'none';
+        }
+    }
+
+    function loadYoutubeInfo() {
+        fetch('/api/youtube_info')
+            .then(response => response.json())
+            .then(data => {
+                const sec = document.getElementById('export-section');
+                if (data.error) {
+                    sec.innerHTML = `<p style="color: #ff6b6b;">${data.error}</p>`;
+                    return;
+                }
+                let html = `<h4 style="margin-top:0;">Export to YouTube Playlist</h4>`;
+                html += `<p style="font-size:0.9em;">Connected Account: <strong>${data.channel}</strong></p>`;
+                html += `<div style="margin-bottom: 10px;">
+                            <label>Select Playlist:</label>
+                            <select id="export_playlist_id" style="width: 100%;">
+                                <option value="">-- Create New Playlist --</option>`;
+                data.playlists.forEach(pl => {
+                    html += `<option value="${pl.id}">${pl.title}</option>`;
+                });
+                html += `   </select>
+                         </div>`;
+                html += `<div style="margin-bottom: 10px;">
+                            <label>Or New Playlist Name:</label>
+                            <input type="text" id="new_playlist_name" placeholder="My New Playlist">
+                         </div>`;
+                html += `<p style="font-size: 0.8em; color: #aaa;">Exports all ${ {{ videos_count }} } filtered videos. Duplicates in the target playlist will be skipped.</p>`;
+                html += `<button type="button" onclick="submitExport()" class="save-button">Start Export</button>`;
+                
+                sec.innerHTML = html;
+            });
+    }
+
+    function submitExport() {
+        const mainForm = document.querySelector('.filter-form');
+        const exportForm = document.createElement('form');
+        exportForm.method = 'POST';
+        exportForm.action = '{{ url_for("export_playlist") }}';
+        
+        // Copy main filter inputs
+        const inputs = ['min_rating_music', 'min_rating_video', 'genre_filter', 'favorite_only', 'include_unrated', 'exclude_rejected'];
+        inputs.forEach(name => {
+            const el = mainForm.elements[name];
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = name;
+            if (el.type === 'checkbox') {
+                if (el.checked) exportForm.appendChild(hidden);
+            } else {
+                hidden.value = el.value;
+                exportForm.appendChild(hidden);
+            }
+        });
+        
+        // Add export specific inputs
+        const plSelect = document.getElementById('export_playlist_id');
+        const newPlInput = document.getElementById('new_playlist_name');
+        
+        const plHidden = document.createElement('input');
+        plHidden.type = 'hidden';
+        plHidden.name = 'playlist_id';
+        plHidden.value = plSelect.value;
+        exportForm.appendChild(plHidden);
+        
+        const newPlHidden = document.createElement('input');
+        newPlHidden.type = 'hidden';
+        newPlHidden.name = 'new_playlist_name';
+        newPlHidden.value = newPlInput.value;
+        exportForm.appendChild(newPlHidden);
+        
+        document.body.appendChild(exportForm);
+        exportForm.submit();
+    }
 </script>
 
 </body>

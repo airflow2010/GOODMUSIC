@@ -3,10 +3,14 @@ import sys
 import random
 from functools import wraps
 from datetime import datetime, timezone
+import pickle
 
 from flask import Flask, render_template, request, redirect, url_for, Response
 from google.cloud import firestore
 from dotenv import load_dotenv
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
 
 load_dotenv()
 
@@ -15,6 +19,8 @@ load_dotenv()
 # This is set automatically when running on Google Cloud.
 PROJECT_ID = os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT")
 COLLECTION_NAME = "musicvideos"
+TOKEN_FILE = "token.pickle"
+CLIENT_SECRETS_FILE = "client_secret.json"
 
 # --- Authentication Configuration ---
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
@@ -149,6 +155,63 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
+# --- Helper Functions ---
+def get_youtube_service():
+    """Gets an authenticated YouTube service using the local token.pickle."""
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, "rb") as token:
+            creds = pickle.load(token)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                with open(TOKEN_FILE, "wb") as token:
+                    pickle.dump(creds, token)
+            except Exception as e:
+                print(f"Error refreshing token: {e}")
+                return None
+        else:
+            return None
+
+    return build("youtube", "v3", credentials=creds)
+
+def get_filtered_videos_list(db, filters):
+    """Reusable function to query and filter videos based on criteria."""
+    try:
+        base_query = db.collection(COLLECTION_NAME)
+        if filters['exclude_rejected']:
+            base_query = base_query.where(filter=firestore.FieldFilter("rejected", "==", False))
+        if filters['genre_filter'] != 'All':
+            base_query = base_query.where(filter=firestore.FieldFilter("genre", "==", filters['genre_filter']))
+        if filters['favorite_only']:
+            base_query = base_query.where(filter=firestore.FieldFilter("favorite", "==", True))
+
+        candidate_videos = []
+
+        # Query 1: Rated
+        rated_query = base_query.where(
+            filter=firestore.FieldFilter("rating_music", ">=", filters['min_rating_music'])
+        )
+        rated_docs = rated_query.stream()
+        for doc in rated_docs:
+            video_data = doc.to_dict()
+            if video_data.get("date_rated") and video_data.get("rating_video", 0) >= filters['min_rating_video']:
+                candidate_videos.append(video_data)
+
+        # Query 2: Unrated
+        if filters['include_unrated']:
+            unrated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "==", None))
+            unrated_docs = unrated_query.stream()
+            candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
+
+        candidate_videos.sort(key=lambda x: (str(x.get('artist') or '').lower(), str(x.get('track') or '').lower()))
+        return candidate_videos
+    except Exception as e:
+        print(f"An error occurred while fetching/filtering videos: {e}")
+        return []
+
 @app.route("/")
 @requires_auth
 def index():
@@ -237,50 +300,16 @@ def playing_mode():
         include_unrated = source.get('include_unrated', 'false') == 'true'
         exclude_rejected = source.get('exclude_rejected', 'true') == 'true'
 
-    # --- Fetch and Filter Videos ---
-    try:
-        # Build a base query with filters that apply to both rated and unrated videos
-        base_query = db.collection(COLLECTION_NAME)
-        if exclude_rejected:
-            base_query = base_query.where(filter=firestore.FieldFilter("rejected", "==", False))
-        if genre_filter != 'All':
-            base_query = base_query.where(filter=firestore.FieldFilter("genre", "==", genre_filter))
-        if favorite_only:
-            base_query = base_query.where(filter=firestore.FieldFilter("favorite", "==", True))
+    current_filters = {
+        'min_rating_music': min_rating_music,
+        'min_rating_video': min_rating_video,
+        'genre_filter': genre_filter,
+        'favorite_only': favorite_only,
+        'include_unrated': include_unrated,
+        'exclude_rejected': exclude_rejected,
+    }
 
-        candidate_videos = []
-
-        # --- Query 1: Get RATED videos that might meet the criteria ---
-        # Firestore only allows one range filter per query. We filter on music
-        # rating here and will filter on video rating in Python.
-        # We also can't combine a '!=' with a range filter, so we check for
-        # rated status in Python as well.
-        rated_query = base_query.where(
-            filter=firestore.FieldFilter("rating_music", ">=", min_rating_music)
-        )
-        rated_docs = rated_query.stream()
-
-        # Client-side filtering for the remaining conditions
-        for doc in rated_docs:
-            video_data = doc.to_dict()
-            if video_data.get("date_rated") and video_data.get("rating_video", 0) >= min_rating_video:
-                candidate_videos.append(video_data)
-
-        # --- Query 2: Get UNRATED videos, if requested ---
-        if include_unrated:
-            # This query only has equality filters from base_query and one for date_rated
-            unrated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "==", None))
-            unrated_docs = unrated_query.stream()
-            candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
-
-        filtered_videos = candidate_videos
-
-    except Exception as e:
-        print(f"An error occurred while fetching/filtering videos: {e}")
-        filtered_videos = []
-
-    # Sort filtered videos for the playlist
-    filtered_videos.sort(key=lambda x: (str(x.get('artist') or '').lower(), str(x.get('track') or '').lower()))
+    filtered_videos = get_filtered_videos_list(db, current_filters)
 
     videos_count = len(filtered_videos)
 
@@ -305,16 +334,9 @@ def playing_mode():
         print(f"An error occurred while fetching genres: {e}")
         sorted_genres = []
 
-    current_filters = {
-        'min_rating_music': min_rating_music,
-        'min_rating_video': min_rating_video,
-        'genre_filter': genre_filter,
-        'favorite_only': favorite_only,
-        'include_unrated': include_unrated,
-        'exclude_rejected': exclude_rejected,
-    }
+    export_message = request.args.get('export_message')
 
-    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count, playlist=filtered_videos)
+    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count, playlist=filtered_videos, export_message=export_message)
 
 @app.route("/admin")
 @requires_auth
@@ -460,6 +482,107 @@ def save_play_rating(video_id):
         'exclude_rejected': request.form.get('exclude_rejected_hidden')
     }
     return redirect(url_for('playing_mode', **{k: v for k, v in filters.items() if v is not None}))
+
+@app.route("/api/youtube_info")
+@requires_auth
+def api_youtube_info():
+    """Returns the connected YouTube channel and list of playlists."""
+    yt = get_youtube_service()
+    if not yt:
+        return {"error": "Not authenticated. Please run scrape scripts locally once to generate token.pickle."}
+    
+    try:
+        # Get Channel Info
+        channels_response = yt.channels().list(mine=True, part="snippet").execute()
+        channel_title = channels_response["items"][0]["snippet"]["title"] if channels_response["items"] else "Unknown"
+
+        # Get Playlists
+        playlists = []
+        request_pl = yt.playlists().list(mine=True, part="snippet,id", maxResults=50)
+        while request_pl:
+            response = request_pl.execute()
+            for item in response.get("items", []):
+                playlists.append({"id": item["id"], "title": item["snippet"]["title"]})
+            request_pl = yt.playlists().list_next(request_pl, response)
+            
+        return {"channel": channel_title, "playlists": playlists}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route("/export_playlist", methods=['POST'])
+@requires_auth
+def export_playlist():
+    """Exports filtered videos to a YouTube playlist."""
+    filters = {
+        'min_rating_music': request.form.get('min_rating_music', 3, type=int),
+        'min_rating_video': request.form.get('min_rating_video', 3, type=int),
+        'genre_filter': request.form.get('genre_filter', 'All'),
+        'favorite_only': 'favorite_only' in request.form,
+        'include_unrated': 'include_unrated' in request.form,
+        'exclude_rejected': 'exclude_rejected' in request.form,
+    }
+    
+    videos = get_filtered_videos_list(db, filters)
+    yt = get_youtube_service()
+    if not yt:
+        return redirect(url_for('playing_mode', export_message="Error: YouTube API not connected.", **filters))
+        
+    target_playlist_id = request.form.get('playlist_id')
+    new_playlist_name = request.form.get('new_playlist_name')
+    
+    added_count = 0
+    skipped_count = 0
+    error_msg = None
+
+    try:
+        if new_playlist_name:
+            res = yt.playlists().insert(part="snippet,status", body={
+                "snippet": {"title": new_playlist_name},
+                "status": {"privacyStatus": "private"}
+            }).execute()
+            target_playlist_id = res["id"]
+            
+        if not target_playlist_id:
+            return redirect(url_for('playing_mode', export_message="Error: No playlist selected.", **filters))
+
+        # Fetch existing videos to avoid duplicates
+        existing_ids = set()
+        if not new_playlist_name:
+            req = yt.playlistItems().list(playlistId=target_playlist_id, part="snippet", maxResults=50)
+            while req:
+                resp = req.execute()
+                for item in resp.get("items", []):
+                    existing_ids.add(item["snippet"]["resourceId"]["videoId"])
+                req = yt.playlistItems().list_next(req, resp)
+
+        for v in videos:
+            vid = v['video_id']
+            if vid in existing_ids:
+                skipped_count += 1
+                continue
+            try:
+                yt.playlistItems().insert(part="snippet", body={
+                    "snippet": {"playlistId": target_playlist_id, "resourceId": {"kind": "youtube#video", "videoId": vid}}
+                }).execute()
+                added_count += 1
+                existing_ids.add(vid)
+            except HttpError as e:
+                if "quotaExceeded" in str(e):
+                    error_msg = "YouTube API quota exceeded."
+                    break
+    except HttpError as e:
+        if e.resp.status == 403 and "insufficientPermissions" in str(e):
+            error_msg = "Error: Insufficient permissions. Please delete token.pickle and re-run scrape_to_firestore.py locally."
+        else:
+            error_msg = f"YouTube API Error: {str(e)}"
+    except Exception as e:
+        error_msg = f"Error: {str(e)}"
+
+    msg = f"Exported {added_count} videos. {skipped_count} skipped (duplicates)."
+    if error_msg:
+        msg += f" Stopped: {error_msg}"
+        
+    return redirect(url_for('playing_mode', export_message=msg, **filters))
 
 if __name__ == "__main__":
     # Use PORT environment variable for Cloud Run

@@ -38,7 +38,7 @@ ADC_SCOPES = [
 ]
 
 # YouTube OAuth Scopes
-YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
+YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
 
