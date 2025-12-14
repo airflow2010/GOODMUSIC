@@ -9,8 +9,8 @@ Tools for collecting YouTube music videos from Substack, seeding a Firestore cat
     <th>play</th>
   </tr>
   <tr>
-    <td valign="top"><img src="/home/airflow/Documents/python-projekte/GOODMUSIC/prism-ss-rate.png" alt="prism-ss-rate"></td>
-    <td valign="top"><img src="/home/airflow/Documents/python-projekte/GOODMUSIC/prism-ss-play.png" alt="prism-ss-play"></td>
+    <td valign="top"><img src="prism-ss-rate.png" alt="prism-ss-rate"></td>
+    <td valign="top"><img src="prism-ss-play.png" alt="prism-ss-play"></td>
   </tr>
 </table>
 
