@@ -3,14 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>GOODMUSIC prism</title>
     <style>
-        body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; margin: 20px; }
-        .container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; }
-        .video-container { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin-bottom: 20px; }
-        .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-        h1, h2, h3 { color: #ffffff; }
-        form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .filter-form { display: flex; flex-direction: column; gap: 12px; background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
         .filter-row { display: grid; gap: 15px; align-items: center; }
         .filter-row-top { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
@@ -18,30 +13,6 @@
         .filter-form label { font-size: 0.9em; }
         .filter-form .checkbox-group { margin-bottom: 0; }
         .filter-actions { display: flex; justify-content: flex-end; }
-        label { display: block; margin-bottom: 5px; font-size: 1.1em; }
-        input[type="text"], input[type="number"], select {
-            width: 100%; padding: 8px; box-sizing: border-box; background-color: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px;
-        }
-        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-        .checkbox-group label { cursor: pointer; }
-        .checkbox-group input[type="checkbox"] { transform: scale(1.5); margin-right: 5px; }
-        .button-group { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
-        button, .button-link {
-            padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; text-align: center;
-        }
-        .save-button { background-color: #4CAF50; color: white; }
-        .next-button { background-color: #008CBA; color: white; }
-        .info { margin-top: 20px; background-color: #2a2a2a; padding: 15px; border-radius: 4px; }
-        .info p { margin: 5px 0; }
-        .info a { color: #bbbbbb; text-decoration: none; }
-        .info a:hover { text-decoration: underline; }
-        .slider-container { display: flex; flex-direction: column; gap: 5px; }
-        input[type="range"] { -webkit-appearance: none; width: 100%; height: 10px; background: #555; outline: none; opacity: 0.7; -webkit-transition: .2s; transition: opacity .2s; border-radius: 5px; }
-        input[type="range"]:hover { opacity: 1; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #4CAF50; cursor: pointer; border-radius: 50%; }
-        input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; background: #4CAF50; cursor: pointer; border-radius: 50%; }
-        .logo-wrap { display: flex; align-items: center; justify-content: flex-start; margin-bottom: 20px; }
-        .logo { max-width: 200px; height: auto; mix-blend-mode: screen; }
     </style>
 </head>
 <body>

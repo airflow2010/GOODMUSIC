@@ -3,21 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>GOODMUSIC Admin</title>
     <style>
-        body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; margin: 20px; }
-        .container { max-width: 800px; margin: auto; background-color: #1e1e1e; padding: 20px; border-radius: 8px; }
-        h1, h2 { color: #ffffff; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid #333; }
         th { background-color: #2a2a2a; }
         tr:hover { background-color: #2a2a2a; }
         .stat-card { background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 10px; }
         .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-        .logo-wrap { display: flex; align-items: center; justify-content: flex-start; margin-bottom: 20px; }
-        .logo { max-width: 200px; height: auto; mix-blend-mode: screen; }
-        a { color: #4CAF50; text-decoration: none; }
-        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
