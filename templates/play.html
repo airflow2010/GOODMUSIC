@@ -7,13 +7,16 @@
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <title>GOODMUSIC prism</title>
     <style>
-        .filter-form { display: flex; flex-direction: column; gap: 12px; background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+        .filter-form { display: flex; flex-direction: column; gap: 6px; background-color: #2a2a2a; padding: 12px; border-radius: 4px; margin-bottom: 6px; }
         .filter-row { display: grid; gap: 15px; align-items: center; }
         .filter-row-top { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
         .filter-row-bottom { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .filter-form label { font-size: 0.9em; }
         .filter-form .checkbox-group { margin-bottom: 0; }
         .filter-actions { display: flex; justify-content: flex-end; }
+        #playing-form { display: flex; flex-direction: column; gap: 8px; }
+        .section-title { margin: 0 0 4px; }
+        .filter-form + .section-title { margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -30,63 +33,64 @@
     </div>
 
     <!-- Filter Form -->
-    <h3>Filters</h3>
-    <form class="filter-form" action="{{ url_for('playing_mode') }}" method="post">
-        <div class="filter-row filter-row-top">
-            <div>
-                <label for="genre_filter">genre:</label>
-                <select id="genre_filter" name="genre_filter">
-                    <option value="All" {% if filters.genre_filter == 'All' %}selected{% endif %}>All Genres</option>
-                    {% for g in genres %}
-                        <option value="{{ g }}" {% if g == filters.genre_filter %}selected{% endif %}>{{ g }}</option>
-                    {% endfor %}
-                </select>
+    <h3 class="section-title">filter</h3>
+    <form id="playing-form" action="{{ url_for('playing_mode') }}" method="post">
+        <div class="filter-form">
+            <div class="filter-row filter-row-top">
+                <div>
+                    <label for="genre_filter">genre:</label>
+                    <select id="genre_filter" name="genre_filter">
+                        <option value="All" {% if filters.genre_filter == 'All' %}selected{% endif %}>All Genres</option>
+                        {% for g in genres %}
+                            <option value="{{ g }}" {% if g == filters.genre_filter %}selected{% endif %}>{{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="slider-container">
+                    <label for="min_rating_music">min_rating_music: <span id="min_rating_music_display">{{ filters.min_rating_music }}</span></label>
+                    <input type="range" id="min_rating_music" name="min_rating_music" min="1" max="5" value="{{ filters.min_rating_music }}">
+                </div>
+                <div class="slider-container">
+                    <label for="min_rating_video">min_rating_video: <span id="min_rating_video_display">{{ filters.min_rating_video }}</span></label>
+                    <input type="range" id="min_rating_video" name="min_rating_video" min="1" max="5" value="{{ filters.min_rating_video }}">
+                </div>
             </div>
-            <div class="slider-container">
-                <label for="min_rating_music">min_rating_music: <span id="min_rating_music_display">{{ filters.min_rating_music }}</span></label>
-                <input type="range" id="min_rating_music" name="min_rating_music" min="1" max="5" value="{{ filters.min_rating_music }}">
+            <div class="filter-row filter-row-bottom">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="favorite_only" name="favorite_only" {% if filters.favorite_only %}checked{% endif %}>
+                    <label for="favorite_only">favorite_only</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="include_unrated" name="include_unrated" {% if filters.include_unrated %}checked{% endif %}>
+                    <label for="include_unrated">include_unrated</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="exclude_rejected" name="exclude_rejected" {% if filters.exclude_rejected %}checked{% endif %}>
+                    <label for="exclude_rejected">exclude_rejected</label>
+                </div>
+                <div class="filter-actions">
+                    <button type="submit" class="next-button">Apply</button>
+                </div>
             </div>
-            <div class="slider-container">
-                <label for="min_rating_video">min_rating_video: <span id="min_rating_video_display">{{ filters.min_rating_video }}</span></label>
-                <input type="range" id="min_rating_video" name="min_rating_video" min="1" max="5" value="{{ filters.min_rating_video }}">
+            <div class="filter-row" style="grid-template-columns: 1fr; gap: 6px;">
+                <label for="selected_video_id">resulting playlist ({{ videos_count }} videos)</label>
+                <div style="display: flex; gap: 10px; width: 100%;">
+                    <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()" style="flex-grow: 1;">
+                        <option value="">-- Random / Shuffle --</option>
+                        {% for v in playlist %}
+                            <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
+                                {{ v.artist }} ({{ v.track }})
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" onclick="toggleExport()" class="next-button" style="background-color: #ff9800; width: auto;">Export</button>
+                </div>
             </div>
-        </div>
-        <div class="filter-row filter-row-bottom">
-            <div class="checkbox-group">
-                <input type="checkbox" id="favorite_only" name="favorite_only" {% if filters.favorite_only %}checked{% endif %}>
-                <label for="favorite_only">favorite_only</label>
-            </div>
-            <div class="checkbox-group">
-                <input type="checkbox" id="include_unrated" name="include_unrated" {% if filters.include_unrated %}checked{% endif %}>
-                <label for="include_unrated">include_unrated</label>
-            </div>
-            <div class="checkbox-group">
-                <input type="checkbox" id="exclude_rejected" name="exclude_rejected" {% if filters.exclude_rejected %}checked{% endif %}>
-                <label for="exclude_rejected">exclude_rejected</label>
-            </div>
-            <div class="filter-actions">
-                <button type="submit" class="next-button">Apply</button>
-            </div>
-        </div>
 
-        <div class="filter-row" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 15px;">
-            <label for="selected_video_id">Resulting Playlist:</label>
-            <div style="display: flex; gap: 10px; width: 100%;">
-                <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()" style="flex-grow: 1;">
-                    <option value="">-- Random / Shuffle --</option>
-                    {% for v in playlist %}
-                        <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
-                            {{ v.artist }} ({{ v.track }})
-                        </option>
-                    {% endfor %}
-                </select>
-                <button type="button" onclick="toggleExport()" class="next-button" style="background-color: #ff9800; width: auto;">Export</button>
+            <div id="export-section" style="display: none; background-color: #333; padding: 15px; margin-top: 10px; border-radius: 4px; border: 1px solid #555;">
+                <!-- Content loaded via JS -->
+                <p>Loading YouTube info...</p>
             </div>
-        </div>
-
-        <div id="export-section" style="display: none; background-color: #333; padding: 15px; margin-top: 10px; border-radius: 4px; border: 1px solid #555;">
-            <!-- Content loaded via JS -->
-            <p>Loading YouTube info...</p>
         </div>
     </form>
 
@@ -289,7 +293,7 @@
     }
 
     function submitExport() {
-        const mainForm = document.querySelector('.filter-form');
+        const mainForm = document.getElementById('playing-form');
         const exportForm = document.createElement('form');
         exportForm.method = 'POST';
         exportForm.action = '{{ url_for("export_playlist") }}';
