@@ -11,7 +11,7 @@ from google.auth.exceptions import RefreshError
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
-TARGET_STRING = "Automatisch erstellt aus HTML-Datei"
+TARGET_STRING = "Automatisch erstellt aus Substack"
 
 def get_youtube_service():
     """

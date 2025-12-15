@@ -23,10 +23,6 @@ Goal: Create your own MTV! 🎶
 - Rate and filter the catalog in a browser (play mode for discovery, rate mode for unrated items).
 - Export the desired selection (by filter) to YouTube-Playlist (roadmap)
 
-## Upcoming features
-
-Import/Export from/to prism to/from YouTube-Playlist
-
 ## Repository layout
 
 - `prism-gui.py` — Flask app that renders the rating (`/rate`) and play (`/play`) pages using Firestore data.
@@ -149,7 +145,7 @@ Notes:
 
 - `/rate` — shows unrated videos (`date_rated` is null) to rate.
 - `/play` — lets you filter (genre, min ratings, favorites, unrated inclusion, rejected exclusion) and play/rate.
-- `/admin` — hidden (has to be entered manually), shows some statistics
+- `/admin` — shows some statistics and allows importing videos
 
 ### 2a) Run the Flask UI locally
 

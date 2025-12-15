@@ -27,9 +27,10 @@
         <div class="logo-wrap" style="margin-bottom: 0;">
             <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
         </div>
-        <select onchange="window.location.href=this.value" style="font-size: 1.5em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
+        <select onchange="window.location.href=this.value" style="font-size: 1.2em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
             <option value="{{ url_for('rating_mode') }}">rate</option>
             <option value="{{ url_for('playing_mode') }}" selected>play</option>
+            <option value="{{ url_for('admin_mode') }}">admin</option>
         </select>
     </div>
 
@@ -80,12 +81,12 @@
                         <option value="">-- Random / Shuffle --</option>
                         {% for v in playlist %}
                             <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
-                                {{ v.artist }} ({{ v.track }})
+                                {{ v.artist }} - {{ v.track }}
                             </option>
                         {% endfor %}
                     </select>
                     <button type="submit" onclick="document.getElementById('selected_video_id').value='';" class="next-button" style="width: auto; white-space: nowrap;">Play Next</button>
-                    <button type="button" onclick="toggleExport()" class="next-button" style="background-color: #ff9800; width: auto;">Export</button>
+                    <button type="button" onclick="toggleExport()" class="next-button" style="background-color: mediumpurple; width: auto;">Export</button>
                 </div>
             </div>
 
@@ -97,7 +98,6 @@
     </form>
 
     {% if video %}
-        <h2>{{ video.title }}</h2>
 
         {% if export_message %}
             <div style="background-color: #2a2a2a; border-left: 5px solid #ff9800; padding: 10px; margin-bottom: 20px;">{{ export_message }}</div>

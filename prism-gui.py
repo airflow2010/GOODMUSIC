@@ -1,11 +1,12 @@
 import os
 import sys
+import subprocess
 import random
 from functools import wraps
 from datetime import datetime, timezone
 import pickle
 
-from flask import Flask, render_template, request, redirect, url_for, Response
+from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context
 from google.cloud import firestore
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
@@ -583,6 +584,56 @@ def export_playlist():
         msg += f" Stopped: {error_msg}"
         
     return redirect(url_for('playing_mode', export_message=msg, **filters))
+
+@app.route("/admin/run-scraper")
+@requires_auth
+def run_scraper():
+    """
+    Executes the scrape_to_firestore.py script as a subprocess and streams the output.
+    """
+    limit_posts = request.args.get('limit_posts', '0')
+    limit_entries = request.args.get('limit_entries', '10')
+    substack_url = request.args.get('substack_url', 'https://goodmusic.substack.com/archive')
+    
+    def generate():
+        # Construct the command. 
+        # sys.executable ensures we use the same Python interpreter (virtualenv) as the web app.
+        # -u forces unbuffered binary stdout/stderr, allowing real-time streaming.
+        cmd = [
+            sys.executable, '-u', 'scrape_to_firestore.py',
+            '--project', PROJECT_ID,
+            '--limit-substack-posts', limit_posts,
+            '--limit-new-db-entries', limit_entries,
+            '--substack', substack_url
+        ]
+        
+        yield f"🚀 Executing command: {' '.join(cmd)}\n\n"
+        
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, # Merge stderr into stdout
+                text=True,
+                bufsize=1 # Line buffered
+            )
+            
+            # Read output line by line and yield to the browser
+            for line in iter(process.stdout.readline, ''):
+                yield line
+                
+            process.stdout.close()
+            return_code = process.wait()
+            
+            if return_code != 0:
+                yield f"\n❌ Script exited with error code {return_code}"
+            else:
+                yield "\n✅ Script finished successfully."
+                
+        except Exception as e:
+            yield f"\n❌ Error executing script: {str(e)}"
+
+    return Response(stream_with_context(generate()), mimetype='text/plain')
 
 if __name__ == "__main__":
     # Use PORT environment variable for Cloud Run

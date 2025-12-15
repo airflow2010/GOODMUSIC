@@ -14,13 +14,14 @@
         <div class="logo-wrap" style="margin-bottom: 0;">
             <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
         </div>
-        <select onchange="window.location.href=this.value" style="font-size: 1.5em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
+        <select onchange="window.location.href=this.value" style="font-size: 1.2em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
             <option value="{{ url_for('rating_mode') }}" selected>rate</option>
             <option value="{{ url_for('playing_mode') }}">play</option>
+            <option value="{{ url_for('admin_mode') }}">admin</option>
         </select>
     </div>
     {% if video %}
-        <h2>{{ video.title }}</h2>
+        <h3>{{ video.artist }} - {{ video.track }}</h3>
 
         <!-- YouTube Player -->
         <div class="video-container">
@@ -71,9 +72,9 @@
 
             <!-- Buttons -->
             <div class="button-group">
-                <a href="{{ url_for('rating_mode') }}" class="button-link next-button" style="background-color: Gainsboro; color: #121212;">Skip & Next</a>
+                <a href="{{ url_for('rating_mode') }}" class="button-link next-button">Play Next</a>
                 <span style="color: grey;">{{ videos_left }} videos left to rate</span>
-                <button type="submit" class="save-button" style="background-color: LightSkyBlue; color: #121212;">Save & Next</button>
+                <button type="submit" class="save-button">Save & Next</button>
             </div>
         </form>
 

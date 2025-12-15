@@ -17,12 +17,18 @@
 <body>
 
 <div class="container">
-    <div class="logo-wrap">
-        <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div class="logo-wrap" style="margin-bottom: 0;">
+            <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+        </div>
+        <select onchange="window.location.href=this.value" style="font-size: 1.2em; font-weight: bold; background-color: #1e1e1e; color: #ffffff; border: 1px solid #555; padding: 5px; border-radius: 5px; cursor: pointer;">
+            <option value="{{ url_for('rating_mode') }}">rate</option>
+            <option value="{{ url_for('playing_mode') }}">play</option>
+            <option value="{{ url_for('admin_mode') }}" selected>admin</option>
+        </select>
     </div>
     
     <h1>Admin Dashboard</h1>
-    <p><a href="{{ url_for('rating_mode') }}">← Back to App</a></p>
 
     <h2>General Statistics</h2>
     <div class="stat-card">
@@ -63,7 +69,76 @@
             {% endfor %}
         </tbody>
     </table>
+
+    <h2 style="margin-top: 40px;">Video Import</h2>
+    <div class="stat-card">
+        <h3>from Substack</h3>
+        <form id="scraper-form" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; align-items: center;">
+                <label for="limit_posts" style="width: 280px; font-size: 0.9em;">--limit-substack-posts (0 for all)</label>
+                <input type="text" id="limit_posts" name="limit_posts" value="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+            </div>
+            <div style="display: flex; align-items: center;">
+                <label for="limit_entries" style="width: 280px; font-size: 0.9em;">--limit-new-db-entries (0 for all)</label>
+                <input type="text" id="limit_entries" name="limit_entries" value="10" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+            </div>
+            <div style="display: flex; align-items: center;">
+                 <label for="substack_url" style="width: 280px; font-size: 0.9em;">--substack</label>
+                 <input type="text" id="substack_url" name="substack_url" value="https://goodmusic.substack.com/archive" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
+            </div>
+            <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+        </form>
+        
+        <pre id="scraper-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 300px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+
+        <h3 style="margin-top: 20px;">from YouTube playlist</h3>
+        <p>coming soon</p>
+
+        <h3 style="margin-top: 20px;">from YouTube ID</h3>
+        <p>coming soon</p>
+    </div>
 </div>
+
+<script>
+    document.getElementById('scraper-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const output = document.getElementById('scraper-output');
+        const limitPosts = document.getElementById('limit_posts').value;
+        const limitEntries = document.getElementById('limit_entries').value;
+        const substackUrl = document.getElementById('substack_url').value;
+        
+        output.style.display = 'block';
+        output.textContent = 'Initializing...\n';
+        
+        const url = new URL("{{ url_for('run_scraper') }}", window.location.origin);
+        url.searchParams.append('limit_posts', limitPosts);
+        url.searchParams.append('limit_entries', limitEntries);
+        url.searchParams.append('substack_url', substackUrl);
+
+        fetch(url)
+            .then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                function read() {
+                    reader.read().then(({ done, value }) => {
+                        if (done) {
+                            output.textContent += '\n--- End of Stream ---';
+                            return;
+                        }
+                        const text = decoder.decode(value);
+                        output.textContent += text;
+                        output.scrollTop = output.scrollHeight; // Auto-scroll to bottom
+                        read();
+                    });
+                }
+                read();
+            })
+            .catch(err => {
+                output.textContent += `\nError: ${err}`;
+            });
+    });
+</script>
 
 </body>
 </html>
