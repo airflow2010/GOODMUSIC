@@ -71,9 +71,9 @@
 
             <!-- Buttons -->
             <div class="button-group">
-                <button type="submit" class="save-button">Save & Next</button>
+                <a href="{{ url_for('rating_mode') }}" class="button-link next-button" style="background-color: Gainsboro; color: #121212;">Skip & Next</a>
                 <span style="color: grey;">{{ videos_left }} videos left to rate</span>
-                <a href="{{ url_for('rating_mode') }}" class="button-link next-button">Skip & Next</a>
+                <button type="submit" class="save-button" style="background-color: LightSkyBlue; color: #121212;">Save & Next</button>
             </div>
         </form>
 
