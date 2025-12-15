@@ -189,6 +189,15 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 50%;
 }
 
+.unrated {
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+
+.unrated:focus, .unrated:hover {
+    opacity: 1;
+}
+
 input[type="range"]::-moz-range-thumb {
     width: 20px;
     height: 20px;

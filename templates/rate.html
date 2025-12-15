@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
     <title>GOODMUSIC prism</title>
 </head>
 <body>
@@ -30,7 +31,7 @@
             <!-- Ratings -->
             <div>
                 <label for="rating_music">rating_music:</label>
-                <select id="rating_music" name="rating_music" required>
+                <select id="rating_music" name="rating_music" required class="{% if not video.date_rated %}unrated{% endif %}">
                     {% for val, desc in music_ratings.items()|sort(reverse=True) %}
                         <option value="{{ val }}" {% if val == 3 %}selected{% endif %}>{{ desc }}</option>
                     {% endfor %}
@@ -38,7 +39,7 @@
             </div>
             <div>
                 <label for="rating_video">rating_video:</label>
-                <select id="rating_video" name="rating_video" required>
+                <select id="rating_video" name="rating_video" required class="{% if not video.date_rated %}unrated{% endif %}">
                     {% for val, desc in video_ratings.items()|sort(reverse=True) %}
                         <option value="{{ val }}" {% if val == 3 %}selected{% endif %}>{{ desc }}</option>
                     {% endfor %}
