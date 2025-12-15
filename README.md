@@ -147,7 +147,7 @@ Notes:
 
 `prism-gui.py` serves:
 
-- `/rate` — shows unrated videos (`musical_value == 0`) to rate.
+- `/rate` — shows unrated videos (`date_rated` is null) to rate.
 - `/play` — lets you filter (genre, min ratings, favorites, unrated inclusion, rejected exclusion) and play/rate.
 - `/admin` — hidden (has to be entered manually), shows some statistics
 

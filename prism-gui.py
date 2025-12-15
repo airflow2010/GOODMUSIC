@@ -248,7 +248,7 @@ def rating_mode():
         print(f"An error occurred while fetching genres: {e}")
         sorted_genres = []
 
-    # Query for unrated videos (where musical_value is 0)
+    # Query for unrated videos (where date_rated is None)
     query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("date_rated", "==", None)).limit(20).stream()
     
     unrated_videos = [doc.to_dict() for doc in query]
