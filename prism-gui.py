@@ -4,14 +4,13 @@ import subprocess
 import random
 from functools import wraps
 from datetime import datetime, timezone
-import pickle
+from urllib.parse import parse_qs, urlparse
 
 from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context
 from google.cloud import firestore
 from dotenv import load_dotenv
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from google.auth.transport.requests import Request
+from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video
 
 load_dotenv()
 
@@ -20,8 +19,6 @@ load_dotenv()
 # This is set automatically when running on Google Cloud.
 PROJECT_ID = os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT")
 COLLECTION_NAME = "musicvideos"
-TOKEN_FILE = "token.pickle"
-CLIENT_SECRETS_FILE = "client_secret.json"
 
 # --- Authentication Configuration ---
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
@@ -157,27 +154,6 @@ def requires_auth(f):
     return decorated
 
 # --- Helper Functions ---
-def get_youtube_service():
-    """Gets an authenticated YouTube service using the local token.pickle."""
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "rb") as token:
-            creds = pickle.load(token)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                with open(TOKEN_FILE, "wb") as token:
-                    pickle.dump(creds, token)
-            except Exception as e:
-                print(f"Error refreshing token: {e}")
-                return None
-        else:
-            return None
-
-    return build("youtube", "v3", credentials=creds)
-
 def get_filtered_videos_list(db, filters):
     """Reusable function to query and filter videos based on criteria."""
     try:
@@ -212,6 +188,42 @@ def get_filtered_videos_list(db, filters):
     except Exception as e:
         print(f"An error occurred while fetching/filtering videos: {e}")
         return []
+
+
+def normalize_playlist_id(raw: str) -> str:
+    """Extract playlist ID from plain ID or URL."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "://" in value:
+        try:
+            parsed = urlparse(value)
+            qs = parse_qs(parsed.query)
+            value = qs.get("list", [value])[-1]
+        except Exception:
+            pass
+    return value
+
+
+def normalize_video_id(raw: str) -> str:
+    """Extract video ID from plain ID or typical YouTube URL."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "youtu" in value:
+        try:
+            parsed = urlparse(value)
+            if parsed.hostname and "youtu.be" in parsed.hostname:
+                candidate = parsed.path.lstrip("/")
+                if candidate:
+                    return candidate
+            qs = parse_qs(parsed.query)
+            candidate = qs.get("v", [value])[-1]
+            if candidate:
+                return candidate
+        except Exception:
+            pass
+    return value
 
 @app.route("/")
 @requires_auth
@@ -488,7 +500,7 @@ def save_play_rating(video_id):
 @requires_auth
 def api_youtube_info():
     """Returns the connected YouTube channel and list of playlists."""
-    yt = get_youtube_service()
+    yt = ingestion_get_youtube_service()
     if not yt:
         return {"error": "Not authenticated. Please run scrape scripts locally once to generate token.pickle."}
     
@@ -524,7 +536,7 @@ def export_playlist():
     }
     
     videos = get_filtered_videos_list(db, filters)
-    yt = get_youtube_service()
+    yt = ingestion_get_youtube_service()
     if not yt:
         return redirect(url_for('playing_mode', export_message="Error: YouTube API not connected.", **filters))
         
@@ -584,6 +596,125 @@ def export_playlist():
         msg += f" Stopped: {error_msg}"
         
     return redirect(url_for('playing_mode', export_message=msg, **filters))
+
+@app.route("/admin/import-playlist")
+@requires_auth
+def import_playlist():
+    """Import videos from a YouTube playlist into Firestore."""
+    raw_playlist = (request.args.get("playlist_id") or "").strip()
+    playlist_id = normalize_playlist_id(raw_playlist)
+    limit = request.args.get("limit", default=0, type=int)
+
+    def generate():
+        if not playlist_id:
+            yield "❌ Missing playlist_id query parameter.\n"
+            return
+
+        yt = ingestion_get_youtube_service()
+        if not yt:
+            yield "❌ YouTube API not connected. Run the scrape script locally once to generate token.pickle.\n"
+            return
+
+        yield f"📥 Fetching playlist {playlist_id}...\n"
+        try:
+            ids = fetch_playlist_video_ids(yt, playlist_id)
+        except Exception as e:
+            yield f"❌ Error fetching playlist: {e}\n"
+            return
+
+        if not ids:
+            yield "⚠️ No videos found in playlist or playlist is private.\n"
+            return
+
+        if limit and limit > 0:
+            ids = ids[:limit]
+            yield f"ℹ️ Limiting to first {limit} entries.\n"
+
+        total = len(ids)
+        yield f"✅ Found {total} unique videos. Starting import...\n"
+
+        added = exists = unavailable = errors = 0
+        source = f"https://www.youtube.com/playlist?list={playlist_id}"
+        for idx, vid in enumerate(ids, start=1):
+            result = ingest_single_video(
+                db,
+                yt,
+                vid,
+                source=source,
+                model=None,  # UI import skips AI to keep UI lightweight
+                model_name="ui",
+            )
+            status = result.get("status")
+            title = result.get("title") or ""
+            if status == "added":
+                added += 1
+                yield f"[{idx}/{total}] ✅ Added {vid} {title}\n"
+            elif status == "exists":
+                exists += 1
+                yield f"[{idx}/{total}] ↩️  Already in DB {vid}\n"
+            elif status == "unavailable":
+                unavailable += 1
+                yield f"[{idx}/{total}] ⚠️  Unavailable/private {vid}\n"
+            else:
+                errors += 1
+                yield f"[{idx}/{total}] ❌ Error {vid}: {result.get('message')}\n"
+
+        yield f"\nSummary: {added} added, {exists} existing, {unavailable} unavailable, {errors} errors.\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
+
+@app.route("/admin/import-video")
+@requires_auth
+def import_video():
+    """Import one or more comma-separated YouTube video IDs into Firestore."""
+    raw_ids = (request.args.get("video_ids") or "").replace("\n", ",")
+    ids = []
+    for vid in raw_ids.split(","):
+        norm = normalize_video_id(vid)
+        if norm:
+            ids.append(norm)
+
+    def generate():
+        if not ids:
+            yield "❌ Provide video_ids (comma-separated) in the query parameters.\n"
+            return
+
+        yt = ingestion_get_youtube_service()
+        if not yt:
+            yield "❌ YouTube API not connected. Run the scrape script locally once to generate token.pickle.\n"
+            return
+
+        total = len(ids)
+        yield f"✅ Received {total} video ID(s). Starting import...\n"
+        source = "manual-import"
+        added = exists = unavailable = errors = 0
+        for idx, vid in enumerate(ids, start=1):
+            result = ingest_single_video(
+                db,
+                yt,
+                vid,
+                source=source,
+                model=None,
+                model_name="ui",
+            )
+            status = result.get("status")
+            title = result.get("title") or ""
+            if status == "added":
+                added += 1
+                yield f"[{idx}/{total}] ✅ Added {vid} {title}\n"
+            elif status == "exists":
+                exists += 1
+                yield f"[{idx}/{total}] ↩️  Already in DB {vid}\n"
+            elif status == "unavailable":
+                unavailable += 1
+                yield f"[{idx}/{total}] ⚠️  Unavailable/private {vid}\n"
+            else:
+                errors += 1
+                yield f"[{idx}/{total}] ❌ Error {vid}: {result.get('message')}\n"
+
+        yield f"\nSummary: {added} added, {exists} existing, {unavailable} unavailable, {errors} errors.\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
 
 @app.route("/admin/run-scraper")
 @requires_auth

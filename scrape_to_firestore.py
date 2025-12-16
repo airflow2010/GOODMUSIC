@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 import html as htmllib
-import os
 import re
 import time
-import json
-import pickle
 import sys
-from datetime import datetime, timezone
 from typing import List, Tuple
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,31 +13,17 @@ from bs4 import BeautifulSoup
 # Google Cloud imports
 import google.auth
 from google.cloud import firestore
-from google.api_core import exceptions
 import vertexai
-from vertexai.generative_models import GenerativeModel, Part
+from vertexai.generative_models import GenerativeModel
 
-# YouTube API
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from google.auth.exceptions import RefreshError
-
-# Media downloading
-import yt_dlp
+from ingestion import get_youtube_service, ingest_video_batch, parse_datetime
 
 # ====== Configuration ======
-COLLECTION_NAME = "musicvideos"
 YOUTUBE_ID_RE = r"[A-Za-z0-9_-]{11}"
 # ADC Scopes (for Firestore & Vertex AI)
 ADC_SCOPES = [
     "https://www.googleapis.com/auth/cloud-platform"
 ]
-
-# YouTube OAuth Scopes
-YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
-TOKEN_FILE = "token.pickle"
-CLIENT_SECRETS_FILE = "client_secret.json"
 
 # ====== HTML Parsing (Reused from your script) ======
 def extract_title_from_html_text(html_text: str) -> str | None:
@@ -166,58 +149,6 @@ def fetch_post_html(url: str) -> str:
         print(f"⚠️ Error loading {url}: {e}")
         return ""
 
-# ====== YouTube Auth ======
-def get_youtube_service():
-    """
-    Authenticates with the YouTube API using an OAuth 2.0 flow based on a
-    `client_secret.json` file. Caches credentials in `token.pickle`.
-    """
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "rb") as token:
-            creds = pickle.load(token)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except RefreshError:
-                print("⚠️ YouTube token has been revoked, starting new login...")
-                creds = None
-        
-        if not creds:
-            if os.path.exists(TOKEN_FILE):
-                os.remove(TOKEN_FILE)
-            if not os.path.exists(CLIENT_SECRETS_FILE):
-                print(f"❌ Missing credentials file: {CLIENT_SECRETS_FILE}", file=sys.stderr)
-                print("   Please download your OAuth 2.0 Client ID from the Google Cloud Console and place it in the project directory.", file=sys.stderr)
-                return None
-            
-            print("🔐 Please complete the browser-based authentication for the YouTube API...")
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, YOUTUBE_SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        with open(TOKEN_FILE, "wb") as token:
-            pickle.dump(creds, token)
-
-    return build("youtube", "v3", credentials=creds)
-
-# ====== AI & Database Logic ======
-
-def parse_datetime(value: str | None) -> datetime | None:
-    """Parse various ISO-ish date strings into timezone-aware datetimes."""
-    if not value:
-        return None
-    try:
-        clean = value.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(clean)
-        if not dt.tzinfo:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except Exception:
-        return None
-
-
 def extract_substack_date_from_html(html_text: str) -> datetime | None:
     """Extract publish date from Substack HTML if present."""
     soup = BeautifulSoup(html_text, "html.parser")
@@ -233,153 +164,6 @@ def extract_substack_date_from_html(html_text: str) -> datetime | None:
             return dt
     return None
 
-
-def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | None:
-    """Fetches video title and upload date from YouTube API to help Gemini."""
-    if not youtube:
-        return "", None
-    try:
-        response = youtube.videos().list(
-            part="snippet,status",
-            id=video_id
-        ).execute()
-        if "items" in response and len(response["items"]) > 0:
-            item = response["items"][0]
-            status = item.get("status", {})
-            if status.get("privacyStatus") == "private":
-                return None
-
-            snippet = item.get("snippet", {})
-            title = snippet.get("title", "")
-            uploaded_at = parse_datetime(snippet.get("publishedAt"))
-            return title, uploaded_at
-        else:
-            return None
-    except Exception as e:
-        print(f"⚠️ YouTube API Error for {video_id}: {e}")
-    return "", None
-
-def download_audio_for_analysis(video_id: str) -> str | None:
-    """Downloads the audio of a YouTube video to a temporary file for AI analysis."""
-    # Use /tmp which is generally writable (including in Cloud Run)
-    output_path = f"/tmp/{video_id}.m4a"
-    
-    # Clean up previous run if exists
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
-
-    ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio', # Prefer m4a (AAC) to avoid ffmpeg conversion if possible
-        'outtmpl': output_path,
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'max_filesize': 25 * 1024 * 1024, # Limit to 25MB to respect API quotas
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-        
-        if os.path.exists(output_path):
-            return output_path
-    except Exception as e:
-        # It's common for some videos to be unavailable or age-gated
-        print(f"      ⚠️ Audio download skipped/failed: {e}")
-    
-    return None
-
-def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str, str, str]:
-    """Uses Gemini to predict genre, confidence, reasoning, artist, and track."""
-    if not model:
-        return "Unknown", 0, "AI model not available.", "", ""
-    
-    allowed_genres = [
-        "Avant-garde & experimental", "Blues", "Classical", "Country",
-        "Easy listening", "Electronic", "Folk", "Hip hop", "Jazz",
-        "Pop", "R&B & soul", "Rock", "Metal", "Punk"
-    ]
-    
-    # 1. Try to download audio
-    audio_path = download_audio_for_analysis(video_id)
-    parts = []
-
-    # 2. Prepare the prompt
-    prompt_parts = [
-        f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
-    ]
-    if video_title:
-        prompt_parts.append(f" and Title '{video_title}'")
-    
-    if audio_path:
-        print(f"      🎵 Analyzing actual audio content...")
-        prompt_parts.append(". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre.")
-        try:
-            with open(audio_path, "rb") as f:
-                audio_data = f.read()
-            # Pass the audio data directly to the model
-            parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
-        except Exception as e:
-            print(f"      ⚠️ Error reading audio file: {e}")
-
-    prompt_parts.append("\n\nYour response must be a JSON object with the following keys:")
-    prompt_parts.append(f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. If the genre cannot be determined reliably, use "Unknown".')
-    prompt_parts.append('2. "fidelity": An integer between 0 and 100 representing your confidence in the genre classification. 100 means you are absolutely certain.')
-    prompt_parts.append('3. "remarks": A short string (1-2 sentences) explaining your reasoning for the genre classification.')
-    prompt_parts.append('4. "artist": A string containing the name of the artist or band.')
-    prompt_parts.append('5. "track": A string containing the name of the song or track.')
-    prompt_parts.append('\nExample response:\n{\n  "genre": "Rock",\n  "fidelity": 85,\n  "remarks": "The song features prominent electric guitars, a strong backbeat, and a classic rock vocal style.",\n  "artist": "The Beatles",\n  "track": "Hey Jude"\n}')
-    
-    prompt_text = "".join(prompt_parts)
-    parts.append(prompt_text)
-
-    try:
-        response = model.generate_content(parts)
-        # Clean up response text before parsing
-        cleaned_text = response.text.strip()
-        if cleaned_text.startswith("```json"):
-            cleaned_text = cleaned_text[7:]
-        if cleaned_text.endswith("```"):
-            cleaned_text = cleaned_text[:-3]
-        
-        data = json.loads(cleaned_text)
-        genre = data.get("genre", "Unknown")
-        fidelity = data.get("fidelity", 0)
-        remarks = data.get("remarks", "")
-        artist = data.get("artist", "")
-        track = data.get("track", "")
-        
-        # Basic validation
-        if genre not in allowed_genres and genre != "Unknown":
-            genre = "Unknown"
-        if not isinstance(fidelity, int) or not (0 <= fidelity <= 100):
-            fidelity = 0
-        if not isinstance(remarks, str):
-            remarks = ""
-        if not isinstance(artist, str):
-            artist = ""
-        if not isinstance(track, str):
-            track = ""
-            
-        return genre, fidelity, remarks, artist, track
-
-    except (json.JSONDecodeError, AttributeError, KeyError) as e:
-        print(f"      ⚠️ Gemini response parsing error: {e}")
-        return "Unknown", 0, "AI response was not in the expected JSON format.", "", ""
-    except Exception as e:
-        print(f"      ⚠️ Gemini Error: {e}")
-        return "Unknown", 0, str(e), "", ""
-    finally:
-        # Clean up the temporary audio file
-        if audio_path and os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except OSError:
-                pass
-
 def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0, model_name: str = "unknown") -> int:
     _, video_ids = extract_from_html_text(html_text)
     if not video_ids:
@@ -390,75 +174,21 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, ma
     date_substack = parse_datetime(post.get("published_at")) or extract_substack_date_from_html(html_text)
 
     print(f"   Found {len(video_ids)} videos in post.")
-    
-    added_count = 0
-    for video_id in video_ids:
-        if max_new_entries > 0 and added_count >= max_new_entries:
-            break
+    summary = ingest_video_batch(
+        db=db,
+        youtube=youtube,
+        video_ids=video_ids,
+        source=post_url,
+        model=model,
+        model_name=model_name,
+        extra_fields={"date_substack": date_substack},
+        max_new_entries=max_new_entries,
+        sleep_between=0.5,
+        progress_logger=lambda msg: print(msg),
+    )
 
-        doc_ref = db.collection(COLLECTION_NAME).document(video_id)
-        
-        # Check if exists to avoid re-processing and AI costs
-        try:
-            doc = doc_ref.get()
-        except exceptions.PermissionDenied:
-            print(f"\n❌ Error: Cloud Firestore API is likely disabled or database is missing.")
-            print(f"   Please enable it here: https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project={db.project}")
-            sys.exit(1)
-
-        if doc.exists:
-            continue
-        
-        print(f"   Processing new video: {video_id}")
-        print(f"      https://www.youtube.com/watch?v={video_id}")
-        
-        # 1. Get Title (optional but helpful for AI)
-        metadata = get_video_metadata(youtube, video_id)
-        if metadata is None:
-            print(f"   ⚠️ Video {video_id} is private or unavailable. Skipping.")
-            continue
-        title, date_youtube = metadata
-        
-        # 2. Predict Genre
-        genre, fidelity, remarks, artist, track = predict_genre(model, video_id, title)
-        print(f"      AI Genre: '{genre}'")
-        print(f"      AI Fidelity: {fidelity}%")
-        print(f"      AI Remarks: {remarks}")
-        print(f"      AI Artist: {artist}")
-        print(f"      AI Track: {track}")
-        
-        # 3. Prepare Data
-        data = {
-            "video_id": video_id,
-            "source": post_url,
-            "rating_music": 3,
-            "rating_video": 3,
-            "genre": genre,
-            "genre_ai_fidelity": fidelity,
-            "genre_ai_remarks": remarks,
-            "ai_model": model_name,
-            "artist": artist,
-            "track": track,
-            "favorite": False,
-            "rejected": False,
-            "title": title,
-            "date_prism": firestore.SERVER_TIMESTAMP,
-            "date_youtube": date_youtube,
-            "date_substack": date_substack,
-            "date_rated": None
-        }
-        
-        # 4. Save
-        doc_ref.set(data)
-        added_count += 1
-        
-        # Rate limit to be nice to APIs
-        time.sleep(0.5)
-
-        # Newline for readability
-        print()
-    
-    return added_count
+    print()
+    return summary["added"]
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape music videos to Firestore.")
