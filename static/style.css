@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@300;400;500;700&family=Bakbak+One&display=swap');
 
 /* General styles */
 :root {
-    --font-headline: 'Roboto', sans-serif;
-    --font-body: 'Roboto', sans-serif;
+    --font-headline: 'Bakbak One', sans-serif;
+    --font-body: 'Noto Sans', sans-serif;
 }
 
 body {
@@ -24,6 +24,7 @@ body {
 h1, h2, h3 {
     font-family: var(--font-headline);
     color: #ffffff;
+    font-weight: 400;
 }
 
 a {
@@ -71,6 +72,7 @@ input[type="text"], input[type="number"], select {
     border: 1px solid #555;
     border-radius: 4px;
     font-family: inherit;
+    font-size: 1em;
 }
 
 .checkbox-group {
@@ -204,4 +206,15 @@ input[type="range"]::-moz-range-thumb {
     background: #4CAF50;
     cursor: pointer;
     border-radius: 50%;
+}
+
+.nav-select {
+    font-size: 1.2em;
+    background-color: #1e1e1e;
+    color: #ffffff;
+    border: 1px solid #555;
+    padding: 5px;
+    border-radius: 5px;
+    cursor: pointer;
+    width: auto;
 }
