@@ -34,7 +34,7 @@
     </div>
 
     <!-- Filter Form -->
-    <h3 class="section-title">filter</h3>
+    <h2 class="section-title">filter</h2>
     <form id="playing-form" action="{{ url_for('playing_mode') }}" method="post">
         <div class="filter-form">
             <div class="filter-row filter-row-top">
@@ -108,7 +108,7 @@
             <div id="player"></div>
         </div>
 
-        <h3 class="section-title">{% if video.date_rated %}change rating of video{% else %}rate video{% endif %}</h3>
+        <h2 class="section-title">{% if video.date_rated %}change rating of video{% else %}rate video{% endif %}</h2>
         <form id="rating-form" action="{{ url_for('save_play_rating', video_id=video.video_id) }}" method="post">
             <div class="filter-form">
             <!-- Hidden fields to preserve filters -->

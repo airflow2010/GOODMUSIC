@@ -9,10 +9,12 @@ Goal: Create your own MTV! 🎶
   <tr>
     <th>rate</th>
     <th>play</th>
+    <th>admin</th>
   </tr>
   <tr>
-    <td valign="top"><img src="prism-ss-rate.png" alt="prism-ss-rate"></td>
-    <td valign="top"><img src="prism-ss-play.png" alt="prism-ss-play"></td>
+    <td valign="top"><img src="prism-ss-rate.png" alt="rate videos"></td>
+    <td valign="top"><img src="prism-ss-play.png" alt="filter and play videos"></td>
+    <td valign="top"><img src="prism-ss-admin.png" alt="admin section"></td>
   </tr>
 </table>
 

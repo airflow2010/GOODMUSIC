@@ -2,7 +2,7 @@
 
 /* General styles */
 :root {
-    --font-headline: 'Bakbak One', sans-serif;
+    --font-headline: 'Noto Sans', sans-serif;
     --font-body: 'Noto Sans', sans-serif;
 }
 
@@ -24,7 +24,7 @@ body {
 h1, h2, h3 {
     font-family: var(--font-headline);
     color: #ffffff;
-    font-weight: 400;
+    font-weight: 500;
 }
 
 a {

@@ -178,7 +178,8 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
 
     prompt_parts.append(
         "\n\nYour response must be a JSON object with the following keys:\n"
-        '1. "genre": One of the allowed genres or "Unknown".\n'
+        f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. '
+        'If the genre cannot be determined reliably, use "Unknown".\n'
         '2. "fidelity": Integer 0-100 for confidence.\n'
         '3. "remarks": Short reasoning.\n'
         '4. "artist": Artist or band name.\n'
@@ -199,7 +200,16 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
             text = text.replace("json", "", 1).strip()
         parsed = json.loads(htmllib.unescape(text))
         genre = parsed.get("genre", "Unknown") or "Unknown"
-        fidelity = int(parsed.get("fidelity", 0)) if isinstance(parsed.get("fidelity", 0), (int, float)) else 0
+        if not isinstance(genre, str):
+            genre = "Unknown"
+        genre = genre.strip()
+        if genre not in allowed_genres and genre != "Unknown":
+            genre = "Unknown"
+
+        raw_fidelity = parsed.get("fidelity", 0)
+        fidelity = int(raw_fidelity) if isinstance(raw_fidelity, (int, float)) else 0
+        fidelity = max(0, min(100, fidelity))
+
         remarks = parsed.get("remarks", "")
         artist = parsed.get("artist", "")
         track = parsed.get("track", "")
