@@ -70,6 +70,19 @@
 
     <h2 style="margin-top: 40px;">Video Import</h2>
     <div class="stat-card">
+        {% if import_restricted %}
+        <h3>from Substack or YouTube playlists/IDs</h3>
+        <div style="background-color: #3e3e3e; border-left: 5px solid #ffcc00; padding: 15px; margin-top: 10px;">
+            <strong style="color: #ffcc00;">Functionality Restricted</strong>
+            <p style="margin-top: 10px; margin-bottom: 0;">
+                Importing videos is currently disabled because this instance is running in the cloud and no <code>cookies.txt</code> file was found. 
+                YouTube blocks automated requests from cloud IP addresses.
+            </p>
+            <p style="margin-top: 10px; margin-bottom: 0;">
+                To enable this feature, please run the application locally or deploy a valid <code>cookies.txt</code> file.
+            </p>
+        </div>
+        {% else %}
         <h3>from Substack</h3>
         <form id="scraper-form" style="display: flex; flex-direction: column; gap: 10px;">
             <div style="display: flex; align-items: center;">
@@ -112,6 +125,7 @@
             <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
         </form>
         <pre id="single-video-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 180px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+        {% endif %}
     </div>
 </div>
 

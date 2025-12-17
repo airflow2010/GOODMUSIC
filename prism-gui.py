@@ -409,7 +409,12 @@ def admin_mode():
                 'pct': calc_pct(count, total_entries)
             })
 
-        return render_template('admin.html', stats=stats)
+        # Safeguard: Detect if running in cloud without cookies
+        is_cloud = os.environ.get("K_SERVICE") is not None
+        has_cookies = os.path.exists("cookies.txt")
+        import_restricted = is_cloud and not has_cookies
+
+        return render_template('admin.html', stats=stats, import_restricted=import_restricted)
 
     except Exception as e:
         return f"An error occurred: {e}", 500
