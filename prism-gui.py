@@ -10,7 +10,7 @@ from flask import Flask, render_template, request, redirect, url_for, Response, 
 from google.cloud import firestore
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
-from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video
+from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, AI_MODEL_NAME
 
 load_dotenv()
 
@@ -631,6 +631,9 @@ def import_playlist():
             yield "⚠️ No videos found in playlist or playlist is private.\n"
             return
 
+        # Initialize AI model for consistency
+        model = init_ai_model(PROJECT_ID)
+
         if limit and limit > 0:
             ids = ids[:limit]
             yield f"ℹ️ Limiting to first {limit} entries.\n"
@@ -646,8 +649,8 @@ def import_playlist():
                 yt,
                 vid,
                 source=source,
-                model=None,  # UI import skips AI to keep UI lightweight
-                model_name="ui",
+                model=model,
+                model_name=AI_MODEL_NAME,
             )
             status = result.get("status")
             title = result.get("title") or ""
@@ -693,14 +696,18 @@ def import_video():
         yield f"✅ Received {total} video ID(s). Starting import...\n"
         source = "manual-import"
         added = exists = unavailable = errors = 0
+        
+        # Initialize AI model for consistency
+        model = init_ai_model(PROJECT_ID)
+
         for idx, vid in enumerate(ids, start=1):
             result = ingest_single_video(
                 db,
                 yt,
                 vid,
                 source=source,
-                model=None,
-                model_name="ui",
+                model=model,
+                model_name=AI_MODEL_NAME,
             )
             status = result.get("status")
             title = result.get("title") or ""

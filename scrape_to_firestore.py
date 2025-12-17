@@ -13,10 +13,8 @@ from bs4 import BeautifulSoup
 # Google Cloud imports
 import google.auth
 from google.cloud import firestore
-import vertexai
-from vertexai.generative_models import GenerativeModel
 
-from ingestion import get_youtube_service, ingest_video_batch, parse_datetime
+from ingestion import get_youtube_service, ingest_video_batch, parse_datetime, init_ai_model, AI_MODEL_NAME
 
 # ====== Configuration ======
 YOUTUBE_ID_RE = r"[A-Za-z0-9_-]{11}"
@@ -214,13 +212,8 @@ def main():
     db = firestore.Client(project=project_id, credentials=creds)
     
     # Vertex AI
-    model_name = "gemini-2.5-flash"
-    try:
-        vertexai.init(project=project_id, location="europe-west4", credentials=creds)
-        model = GenerativeModel(model_name)
-    except Exception as e:
-        print(f"⚠️ Vertex AI Init Error: {e}")
-        model = None
+    model = init_ai_model(project_id, credentials=creds)
+    model_name = AI_MODEL_NAME
     
     # YouTube API (using OAuth 2.0 flow)
     youtube = get_youtube_service()

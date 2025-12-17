@@ -5,13 +5,12 @@ import time
 import sys
 import google.auth
 from google.cloud import firestore
-import vertexai
-from vertexai.generative_models import GenerativeModel
+from ingestion import init_ai_model, AI_MODEL_NAME
 
 # ====== Configuration ======
 COLLECTION_NAME = "musicvideos"
 ADC_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = AI_MODEL_NAME
 
 def predict_artist_track(model, video_id: str, video_title: str) -> tuple[str, str]:
     """Uses Gemini to predict artist and track based on metadata."""
@@ -76,12 +75,8 @@ def main():
         sys.exit(1)
     
     # Vertex AI
-    try:
-        vertexai.init(project=project_id, location="europe-west4", credentials=creds)
-        model = GenerativeModel(MODEL_NAME)
-    except Exception as e:
-        print(f"⚠️ Vertex AI Init Error: {e}")
-        model = None
+    model = init_ai_model(project_id, credentials=creds)
+    if not model:
         sys.exit(1)
 
     print(f"🔍 Scanning collection '{COLLECTION_NAME}' for documents with missing fields...")

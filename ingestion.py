@@ -8,7 +8,8 @@ from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.cloud import firestore
 from googleapiclient.discovery import build
-from vertexai.generative_models import Part
+import vertexai
+from vertexai.generative_models import GenerativeModel, Part
 import yt_dlp
 
 COLLECTION_NAME = "musicvideos"
@@ -16,6 +17,17 @@ TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
+# Centralized AI Model Configuration
+AI_MODEL_NAME = "gemini-2.5-flash"
+
+def init_ai_model(project_id: str, location: str = "europe-west4", credentials=None):
+    """Initializes and returns the Vertex AI model using the centralized model name."""
+    try:
+        vertexai.init(project=project_id, location=location, credentials=credentials)
+        return GenerativeModel(AI_MODEL_NAME)
+    except Exception as e:
+        print(f"⚠️ Vertex AI Init Error: {e}")
+        return None
 
 def parse_datetime(value: str | None) -> datetime | None:
     """Parse various ISO-ish date strings into timezone-aware datetimes."""
