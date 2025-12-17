@@ -23,7 +23,7 @@ Goal: Create your own MTV! 🎶
 - Scrape Substack posts, extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection).
 - Optionally let Vertex AI guess the genre.
 - Rate and filter the catalog in a browser (play mode for discovery, rate mode for unrated items).
-- Export the desired selection (by filter) to YouTube-Playlist (roadmap)
+- Export the desired selection (by filter) to YouTube-Playlist
 
 ## Repository layout
 
