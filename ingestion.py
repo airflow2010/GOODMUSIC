@@ -124,6 +124,10 @@ def download_audio_for_analysis(video_id: str) -> str | None:
         "max_filesize": 25 * 1024 * 1024,
     }
 
+    # Attempt to use cookies if available to bypass bot detection (especially on Cloud Run)
+    if os.path.exists("cookies.txt"):
+        ydl_opts["cookiefile"] = "cookies.txt"
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
@@ -136,7 +140,7 @@ def download_audio_for_analysis(video_id: str) -> str | None:
     return None
 
 
-def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str, str, str]:
+def predict_genre(model, video_id: str, video_title: str) -> Optional[tuple[str, int, str, str, str]]:
     """Uses Gemini to predict genre, confidence, reasoning, artist, and track."""
     if not model:
         return "Unknown", 0, "AI model not available.", "", ""
@@ -159,23 +163,28 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
     ]
 
     audio_path = download_audio_for_analysis(video_id)
+    
+    # 1) Refrain from calling Vertex API if audio download failed
+    if not audio_path:
+        return None
+
     parts = []
 
     prompt_parts = [f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"]
     if video_title:
         prompt_parts.append(f" and Title '{video_title}'")
 
-    if audio_path:
-        prompt_parts.append(
-            ". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre."
-        )
-        try:
-            with open(audio_path, "rb") as f:
-                audio_data = f.read()
-            parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
-        except Exception:
-            pass
+    prompt_parts.append(
+        ". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre."
+    )
+    try:
+        with open(audio_path, "rb") as f:
+            audio_data = f.read()
+        parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
+    except Exception:
+        pass
 
+    # 2) Extra protection layer in prompt
     prompt_parts.append(
         "\n\nYour response must be a JSON object with the following keys:\n"
         f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. '
@@ -183,7 +192,8 @@ def predict_genre(model, video_id: str, video_title: str) -> tuple[str, int, str
         '2. "fidelity": Integer 0-100 for confidence.\n'
         '3. "remarks": Short reasoning.\n'
         '4. "artist": Artist or band name.\n'
-        '5. "track": Song title.'
+        '5. "track": Song title.\n'
+        'IMPORTANT: Do not hallucinate. If you cannot determine the genre/artist/track from the audio, return "Unknown" and empty strings.'
     )
 
     parts.append("".join(prompt_parts))
@@ -254,7 +264,19 @@ def ingest_single_video(
         return {"status": "unavailable", "message": "Video is private or unavailable."}
 
     title, date_youtube = metadata
-    genre, fidelity, remarks, artist, track = predict_genre(model, video_id, title)
+    prediction = predict_genre(model, video_id, title)
+
+    if prediction is None:
+        return {
+            "status": "error",
+            "message": (
+                "Audio download failed. This often happens when YouTube blocks the IP address (e.g. in Cloud Run). "
+                "To fix this, either run the script from a residential IP or provide a 'cookies.txt' file "
+                "exported from a logged-in browser session in the working directory."
+            ),
+        }
+
+    genre, fidelity, remarks, artist, track = prediction
 
     data = {
         "video_id": video_id,
@@ -298,7 +320,7 @@ def ingest_video_batch(
     progress_logger: Optional[Callable[[str], None]] = None,
 ):
     """Batch-ingest a list of video IDs; returns summary counts."""
-    summary = {"added": 0, "exists": 0, "unavailable": 0, "errors": 0}
+    summary = {"added": 0, "exists": 0, "unavailable": 0, "errors": 0, "aborted": False}
     ids_list = list(video_ids)
     total = len(ids_list)
 
@@ -333,7 +355,13 @@ def ingest_video_batch(
             log(f"   ⚠️  Unavailable/private {vid}")
         else:
             summary["errors"] += 1
-            log(f"   ❌ Error {vid}: {result.get('message')}")
+            msg = result.get("message", "")
+            log(f"   ❌ Error {vid}: {msg}")
+
+            if "Audio download failed" in msg:
+                log("   🛑 Aborting batch: Audio download is failing (likely IP blocking). Retry if it was just a temporary problem.")
+                summary["aborted"] = True
+                break
 
         if sleep_between:
             time.sleep(sleep_between)

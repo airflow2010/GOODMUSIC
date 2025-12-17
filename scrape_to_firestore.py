@@ -164,10 +164,10 @@ def extract_substack_date_from_html(html_text: str) -> datetime | None:
             return dt
     return None
 
-def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0, model_name: str = "unknown") -> int:
+def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0, model_name: str = "unknown") -> Tuple[int, bool]:
     _, video_ids = extract_from_html_text(html_text)
     if not video_ids:
-        return 0
+        return 0, False
     
     post_url = post["url"]
     # Prefer archive JSON date, fall back to HTML meta
@@ -188,7 +188,7 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, ma
     )
 
     print()
-    return summary["added"]
+    return summary["added"], summary.get("aborted", False)
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape music videos to Firestore.")
@@ -249,7 +249,12 @@ def main():
         if args.limit_new_db_entries > 0:
             remaining_limit = args.limit_new_db_entries - total_new_entries
 
-        added = process_post_to_firestore(db, model, youtube, post, html_text, max_new_entries=remaining_limit, model_name=model_name)
+        added, aborted = process_post_to_firestore(db, model, youtube, post, html_text, max_new_entries=remaining_limit, model_name=model_name)
+        
+        if aborted:
+            print("🛑 Aborting scraper due to critical error (IP blocking).")
+            break
+            
         total_new_entries += added
 
 if __name__ == "__main__":
