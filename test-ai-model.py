@@ -7,9 +7,12 @@ import time
 from datetime import datetime, timezone
 from typing import Optional, List
 
-# --- GOOGLE GENAI SDK (The new standard) ---
+# --- GOOGLE GENAI SDK ---
 from google import genai
 from google.genai import types
+
+# --- PYDANTIC (For Structured Outputs) ---
+from pydantic import BaseModel, Field
 
 # --- YOUTUBE & AUTH ---
 import google.auth
@@ -29,6 +32,17 @@ AI_MODELS = [
     "gemini-3-flash-preview",
     "gemini-3-pro-preview",
 ]
+
+# ---------------------------------------------------------------------------
+#  DATA MODELS (Structured Output Schema)
+# ---------------------------------------------------------------------------
+
+class MusicAnalysis(BaseModel):
+    genre: str = Field(description="The music genre. Must be one of the allowed genres or 'Unknown'.")
+    fidelity: int = Field(description="Confidence score between 0 and 100.")
+    remarks: str = Field(description="Short reasoning (1-2 sentences) for the classification.")
+    artist: str = Field(description="The name of the artist, or empty string if unknown.")
+    track: str = Field(description="The name of the track, or empty string if unknown.")
 
 # ---------------------------------------------------------------------------
 #  HELPER FUNCTIONS (YouTube, Audio, Time)
@@ -133,11 +147,11 @@ def download_audio_for_analysis(video_id: str) -> str | None:
     return None
 
 # ---------------------------------------------------------------------------
-#  AI LOGIC (Updated for google-genai SDK)
+#  AI LOGIC (Updated for Structured Outputs)
 # ---------------------------------------------------------------------------
 
 def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str], video_title: str = None, video_description: str = None, audio_path: str = None) -> Optional[tuple[str, int, str, str, str]]:
-    """Uses Gemini (2.5 or 3.0) to predict genre, confidence, reasoning, artist, and track."""
+    """Uses Gemini to predict genre using strict Structured Output enforcement."""
     
     allowed_genres = [
         "Avant-garde & experimental", "Blues", "Classical", "Country",
@@ -145,32 +159,26 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
         "Jazz", "Pop", "R&B & soul", "Rock", "Metal", "Punk",
     ]
 
-    # 1. Construct the Prompt (Multimodal)
+    # 1. Construct the Prompt
     prompt_text = "Categorize the music genre of the song"
     if video_id:
         prompt_text += f" with YouTube Video ID '{video_id}'"
     if video_title: prompt_text += f", Title '{video_title}'"
     if video_description: prompt_text += f", Description '{video_description}'"
     
-    # Add instructions
+    # Specific instructions
     instruction_text = (
-        "\n\nReturn a JSON object with the following keys:\n"
-        f'1. "genre": ONE of {", ".join(allowed_genres)}. Use "Unknown" if unsure.\n'
-        '2. "fidelity": Integer 0-100.\n'
-        '3. "remarks": Short reasoning.\n'
-        '4. "artist": Artist name.\n'
-        '5. "track": Song title.\n'
-        'IMPORTANT: Do not hallucinate. If you don\'t know, return "Unknown". remarks should be a short reasoning (1-2 sentences) describing how you came to your conclusion regarding the detected genre.'
+        f'\n\nFor "genre", select ONE of {", ".join(allowed_genres)}. Use "Unknown" if unsure.\n'
+        'IMPORTANT: Do not hallucinate. If you don\'t know, return "Unknown".'
     )
 
     contents = []
     
-    # If audio exists, add it first (standard best practice for Gemini)
+    # Add Audio if available
     if audio_path:
         try:
             with open(audio_path, "rb") as f:
                 audio_bytes = f.read()
-            # New SDK syntax for bytes
             contents.append(types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp4"))
             prompt_text += ". Analyze the audio rhythm, instrumentation, and vocals."
         except Exception as e:
@@ -180,10 +188,10 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
 
     contents.append(types.Part.from_text(text=prompt_text + instruction_text))
 
-    # 2. Configure Thinking (Only for Gemini 3)
-    # Using 'types.GenerateContentConfig' is the safe way in the new SDK
+    # 2. Configure Thinking & Schema
     config = types.GenerateContentConfig(
-        response_mime_type="application/json" # Enforce JSON output mode
+        response_mime_type="application/json",
+        response_schema=MusicAnalysis  # <--- Strictly enforces the Pydantic model
     )
     
     if "gemini-3" in model_name:
@@ -217,56 +225,39 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
     try:
         # 4. Extract "Thoughts" (Gemini 3 specific)
         thoughts_text = ""
-        # The new SDK parses candidates differently. We look for thought parts.
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
-                # Check for thought attribute or text that looks like a thought
                 if getattr(part, 'thought', False):
                      thoughts_text += f"[Internal Thought]: {part.text}\n"
 
-        # 5. Parse JSON
+        # 5. Parse JSON (Now strictly guaranteed by Schema)
+        # Using built-in SDK parsing to Pydantic object if available, or standard JSON load
+        # response.parsed is available in newer SDKs when schema is used, but manual load is safer across versions
         text = response.text.strip()
-        # Clean markdown code blocks if present
+        
+        # Clean markdown code blocks just in case (though schema usually prevents them)
         if text.startswith("```json"):
             text = text.replace("```json", "").replace("```", "").strip()
         elif text.startswith("```"):
             text = text.replace("```", "").strip()
             
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            # Fallback if strict JSON mode failed
-            return "Unknown", 0, f"JSON Parse Error. Raw: {text[:50]}...", "", ""
-
-        # --- FIX STARTS HERE ---
-        # Handle case where model returns a list [ { "genre": ... } ] instead of { "genre": ... }
-        if isinstance(parsed, list):
-            if len(parsed) > 0 and isinstance(parsed[0], dict):
-                parsed = parsed[0]
-            else:
-                return "Unknown", 0, "Processing Error: Model returned an empty or invalid list.", "", ""
+        parsed_dict = json.loads(text)
         
-        # Ensure parsed is actually a dict before calling .get()
-        if not isinstance(parsed, dict):
-             return "Unknown", 0, "Processing Error: Model returned valid JSON but not an object.", "", ""
-        # --- FIX ENDS HERE ---
+        # Verify it matches our Pydantic model (extra validation layer)
+        analysis = MusicAnalysis(**parsed_dict)
 
-        genre = parsed.get("genre", "Unknown")
+        genre = analysis.genre
+        # Post-process genre to ensure it's in our allowed list
         if genre not in allowed_genres and genre != "Unknown":
             genre = "Unknown"
 
-        fidelity = int(parsed.get("fidelity", 0))
+        fidelity = analysis.fidelity
         
-        # Combine internal thoughts with the model's final remarks for better debugging
-        remarks = parsed.get("remarks", "")
+        remarks = analysis.remarks
         if thoughts_text:
-            # Prepend thoughts to remarks for visibility
             remarks = f"{thoughts_text.strip()} || Final: {remarks}"
 
-        artist = parsed.get("artist", "")
-        track = parsed.get("track", "")
-
-        return genre, fidelity, remarks, artist, track
+        return genre, fidelity, remarks, analysis.artist, analysis.track
 
     except Exception as e:
         return "Unknown", 0, f"Processing Error: {str(e)}", "", ""
@@ -279,11 +270,10 @@ def main():
     parser = argparse.ArgumentParser(description="Test AI models for music genre categorization.")
     parser.add_argument("video_id", help="YouTube Video ID")
     parser.add_argument("--project", default="goodmusic-470520", help="Google Cloud Project ID")
-    # Defaulting to 'global' is safer for Gemini 3
-    parser.add_argument("--location", default="global", help="Vertex AI Location (default: global)")
+    parser.add_argument("--location", default="global", help="Vertex AI Location")
     args = parser.parse_args()
 
-    # Init GenAI Client (Single client for all calls)
+    # Init GenAI Client
     try:
         client = genai.Client(vertexai=True, project=args.project, location=args.location)
     except Exception as e:
@@ -359,13 +349,13 @@ def main():
                 "scenario": scenario_name,
                 "genre": genre,
                 "fidelity": fidelity,
-                "remarks": remarks, # Store full remarks
+                "remarks": remarks,
                 "artist": artist,
                 "track": track,
                 "duration": f"{duration:.2f}s"
             })
-            print(f"      ✅ Done in {duration:.2f}s (Artist: {artist})")
-            print(f"      📝 Remarks: {remarks}")
+            print(f"      ✅ Done in {duration:.2f}s (Artist: {artist}, Genre: {genre})")
+            print(f"      📝 Remarks: {remarks[:100]}..." if len(remarks) > 100 else f"      📝 Remarks: {remarks}")
 
     # Cleanup
     if audio_path and os.path.exists(audio_path):
