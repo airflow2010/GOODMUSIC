@@ -5,34 +5,34 @@ import pickle
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Optional, List
 
+# --- GOOGLE GENAI SDK (The new standard) ---
+from google import genai
+from google.genai import types
+
+# --- YOUTUBE & AUTH ---
 import google.auth
-from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-import vertexai
-from vertexai.generative_models import GenerativeModel, Part
 import yt_dlp
 
 TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
+# Updated Model List
 AI_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
+    "gemini-3-flash-preview",
+    "gemini-3-pro-preview",
 ]
 
-def init_ai_model(project_id: str, location: str, model_name: str, credentials=None):
-    """Initializes and returns the Vertex AI model using the centralized model name."""
-    try:
-        vertexai.init(project=project_id, location=location, credentials=credentials)
-        return GenerativeModel(model_name)
-    except Exception as e:
-        print(f"⚠️ Vertex AI Init Error for {model_name}: {e}")
-        return None
+# ---------------------------------------------------------------------------
+#  HELPER FUNCTIONS (YouTube, Audio, Time)
+# ---------------------------------------------------------------------------
 
 def parse_datetime(value: str | None) -> datetime | None:
     """Parse various ISO-ish date strings into timezone-aware datetimes."""
@@ -46,7 +46,6 @@ def parse_datetime(value: str | None) -> datetime | None:
         return dt
     except Exception:
         return None
-
 
 def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str = CLIENT_SECRETS_FILE):
     """Gets an authenticated YouTube service using the local token file."""
@@ -78,9 +77,8 @@ def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str =
 
     return build("youtube", "v3", credentials=creds)
 
-
 def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | None] | None:
-    """Fetches video title, description and upload date from YouTube API to help Gemini."""
+    """Fetches video title, description and upload date from YouTube API."""
     if not youtube:
         return "", "", None
     try:
@@ -101,9 +99,8 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | Non
     except Exception:
         return "", "", None
 
-
 def download_audio_for_analysis(video_id: str) -> str | None:
-    """Downloads the audio of a YouTube video to a temporary file for AI analysis."""
+    """Downloads the audio of a YouTube video to a temporary file."""
     output_path = f"/tmp/{video_id}.m4a"
 
     if os.path.exists(output_path):
@@ -121,7 +118,6 @@ def download_audio_for_analysis(video_id: str) -> str | None:
         "max_filesize": 25 * 1024 * 1024,
     }
 
-    # Attempt to use cookies if available to bypass bot detection (especially on Cloud Run)
     if os.path.exists("cookies.txt"):
         ydl_opts["cookiefile"] = "cookies.txt"
 
@@ -136,117 +132,136 @@ def download_audio_for_analysis(video_id: str) -> str | None:
 
     return None
 
+# ---------------------------------------------------------------------------
+#  AI LOGIC (Updated for google-genai SDK)
+# ---------------------------------------------------------------------------
 
-def predict_genre(model, video_id: str, video_title: str = None, video_description: str = None, audio_path: str = None) -> Optional[tuple[str, int, str, str, str]]:
-    """Uses Gemini to predict genre, confidence, reasoning, artist, and track."""
-    if not model:
-        return "Unknown", 0, "AI model not available.", "", ""
-
+def predict_genre(client: genai.Client, model_name: str, video_id: str, video_title: str = None, video_description: str = None, audio_path: str = None) -> Optional[tuple[str, int, str, str, str]]:
+    """Uses Gemini (2.5 or 3.0) to predict genre, confidence, reasoning, artist, and track."""
+    
     allowed_genres = [
-        "Avant-garde & experimental",
-        "Blues",
-        "Classical",
-        "Country",
-        "Easy listening",
-        "Electronic",
-        "Folk",
-        "Hip hop",
-        "Jazz",
-        "Pop",
-        "R&B & soul",
-        "Rock",
-        "Metal",
-        "Punk",
+        "Avant-garde & experimental", "Blues", "Classical", "Country",
+        "Easy listening", "Electronic", "Folk", "Hip hop",
+        "Jazz", "Pop", "R&B & soul", "Rock", "Metal", "Punk",
     ]
 
-    parts = []
-
+    # 1. Construct the Prompt (Multimodal)
     prompt_text = f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
-    if video_title:
-        prompt_text += f", Title '{video_title}'"
-    if video_description:
-        prompt_text += f", Description '{video_description}'"
-
-    prompt_parts = [prompt_text]
-
-    if audio_path:
-        prompt_parts.append(". Please analyze the audio of the YouTube video (listen to the rhythm, instrumentation, and vocals) to determine the genre.")
-        try:
-            with open(audio_path, "rb") as f:
-                audio_data = f.read()
-            parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
-        except Exception as e:
-            return "Unknown", 0, f"Error reading audio file: {e}", "", ""
-    else:
-        prompt_parts.append(". Please analyze the video based on the provided information (ID and/or Metadata). If the ID is invalid or you don't recognize it, return Unknown.")
-
-    # 2) Extra protection layer in prompt
-    prompt_parts.append(
-        "\n\nYour response must be a JSON object with the following keys:\n"
-        f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. '
-        'If the genre cannot be determined reliably, or if the video ID is invalid/unknown, use "Unknown".\n'
-        '2. "fidelity": Integer 0-100 for confidence.\n'
+    if video_title: prompt_text += f", Title '{video_title}'"
+    if video_description: prompt_text += f", Description '{video_description}'"
+    
+    # Add instructions
+    instruction_text = (
+        "\n\nReturn a JSON object with the following keys:\n"
+        f'1. "genre": ONE of {", ".join(allowed_genres)}. Use "Unknown" if unsure.\n'
+        '2. "fidelity": Integer 0-100.\n'
         '3. "remarks": Short reasoning.\n'
-        '4. "artist": Artist or band name.\n'
+        '4. "artist": Artist name.\n'
         '5. "track": Song title.\n'
-        'IMPORTANT: Do not hallucinate. If you cannot identify the video or determine the genre/artist/track from the provided information (ID, metadata, or audio), return "Unknown" and empty strings. Do not make up a genre if you are unsure.'
+        'IMPORTANT: Do not hallucinate. If you analyze audio, describe the instruments in the remarks.'
     )
 
-    parts.append("".join(prompt_parts))
+    contents = []
+    
+    # If audio exists, add it first (standard best practice for Gemini)
+    if audio_path:
+        try:
+            with open(audio_path, "rb") as f:
+                audio_bytes = f.read()
+            # New SDK syntax for bytes
+            contents.append(types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp4"))
+            prompt_text += ". Analyze the audio rhythm, instrumentation, and vocals."
+        except Exception as e:
+            return "Unknown", 0, f"Audio read error: {e}", "", ""
+    else:
+        prompt_text += ". Analyze based on ID and metadata only."
+
+    contents.append(types.Part.from_text(text=prompt_text + instruction_text))
+
+    # 2. Configure Thinking (Only for Gemini 3)
+    # Using 'types.GenerateContentConfig' is the safe way in the new SDK
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json" # Enforce JSON output mode
+    )
+    
+    if "gemini-3" in model_name:
+        config.thinking_config = types.ThinkingConfig(
+            include_thoughts=True,
+            thinking_level="HIGH"
+        )
 
     try:
-        response = model.generate_content(parts)
-        text = response.text or ""
-        import html as htmllib
+        # 3. Generate Content
+        response = client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=config
+        )
+        
+        # 4. Extract "Thoughts" (Gemini 3 specific)
+        thoughts_text = ""
+        # The new SDK parses candidates differently. We look for thought parts.
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                # Check for thought attribute or text that looks like a thought
+                if getattr(part, 'thought', False):
+                     thoughts_text += f"[Internal Thought]: {part.text}\n"
 
-        text = text.strip()
+        # 5. Parse JSON
+        text = response.text.strip()
+        # Clean markdown code blocks if present
         if text.startswith("```json"):
-            text = text.strip("` \n")
-            text = text.replace("json", "", 1).strip()
-        parsed = json.loads(htmllib.unescape(text))
-        genre = parsed.get("genre", "Unknown") or "Unknown"
-        if not isinstance(genre, str):
-            genre = "Unknown"
-        genre = genre.strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+        elif text.startswith("```"):
+            text = text.replace("```", "").strip()
+            
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            # Fallback if strict JSON mode failed
+            return "Unknown", 0, f"JSON Parse Error. Raw: {text[:50]}...", "", ""
+
+        genre = parsed.get("genre", "Unknown")
         if genre not in allowed_genres and genre != "Unknown":
             genre = "Unknown"
 
-        raw_fidelity = parsed.get("fidelity", 0)
-        fidelity = int(raw_fidelity) if isinstance(raw_fidelity, (int, float)) else 0
-        fidelity = max(0, min(100, fidelity))
-
+        fidelity = int(parsed.get("fidelity", 0))
+        
+        # Combine internal thoughts with the model's final remarks for better debugging
         remarks = parsed.get("remarks", "")
+        if thoughts_text:
+            # Prepend thoughts to remarks for visibility
+            remarks = f"{thoughts_text.strip()} || Final: {remarks}"
+
         artist = parsed.get("artist", "")
         track = parsed.get("track", "")
-        if not isinstance(remarks, str):
-            remarks = ""
-        if not isinstance(artist, str):
-            artist = ""
-        if not isinstance(track, str):
-            track = ""
-        return genre, fidelity, remarks, artist, track
-    except Exception as e:
-        return "Unknown", 0, str(e), "", ""
 
+        return genre, fidelity, remarks, artist, track
+
+    except Exception as e:
+        return "Unknown", 0, f"API Error: {str(e)}", "", ""
+
+# ---------------------------------------------------------------------------
+#  MAIN LOOP
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Test AI models for music genre categorization.")
     parser.add_argument("video_id", help="YouTube Video ID")
-    parser.add_argument("--project", help="Google Cloud Project ID")
-    parser.add_argument("--location", default="europe-west4", help="Vertex AI Location")
+    parser.add_argument("--project", default="goodmusic-470520", help="Google Cloud Project ID")
+    # Defaulting to 'global' is safer for Gemini 3
+    parser.add_argument("--location", default="global", help="Vertex AI Location (default: global)")
     args = parser.parse_args()
 
-    # Auth
+    # Init GenAI Client (Single client for all calls)
     try:
-        creds, project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        if args.project:
-            project_id = args.project
+        client = genai.Client(vertexai=True, project=args.project, location=args.location)
     except Exception as e:
-        print(f"❌ Auth Error: {e}")
+        print(f"❌ Client Init Error: {e}")
         sys.exit(1)
 
     print(f"🚀 Testing AI Models for Video ID: {args.video_id}")
-    print(f"   Project: {project_id}")
+    print(f"   Project: {args.project}")
     print(f"   Location: {args.location}")
 
     # YouTube Metadata
@@ -259,9 +274,9 @@ def main():
             title, description, _ = metadata
             print(f"   Video Title: {title}")
         else:
-            print("   ⚠️ Could not fetch video metadata (video might be private/deleted).")
+            print("   ⚠️ Could not fetch video metadata.")
     else:
-        print("   ⚠️ YouTube API not available. Proceeding without title.")
+        print("   ⚠️ YouTube API not available.")
 
     # Download Audio
     print("   Downloading audio for analysis...")
@@ -269,7 +284,7 @@ def main():
     if audio_path:
         print(f"   ✅ Audio downloaded to {audio_path}")
     else:
-        print("   ⚠️ Audio download failed. 'ID + Metadata + Audio' scenario will be skipped or limited.")
+        print("   ⚠️ Audio download failed.")
 
     print("-" * 60)
     
@@ -284,11 +299,6 @@ def main():
     for model_name in AI_MODELS:
         print(f"\n🤖 Testing Model: {model_name}...")
         
-        model = init_ai_model(project_id, args.location, model_name, creds)
-        if not model:
-            results.append({"model": model_name, "scenario": "All", "error": "Init failed"})
-            continue
-
         for scenario_name, use_meta, use_audio in scenarios:
             print(f"   👉 Scenario: {scenario_name}")
             
@@ -302,76 +312,59 @@ def main():
 
             start_time = time.time()
             
-            # Prepare args
             t = title if use_meta else None
             d = description if use_meta else None
             a = audio_path if use_audio else None
             
-            genre, fidelity, remarks, artist, track = predict_genre(model, args.video_id, t, d, a)
+            genre, fidelity, remarks, artist, track = predict_genre(client, model_name, args.video_id, t, d, a)
             duration = time.time() - start_time
             
+            # Shorten remarks for display if they contain long thoughts
+            display_remarks = remarks
+            if len(display_remarks) > 100:
+                display_remarks = display_remarks[:97] + "..."
+
             results.append({
                 "model": model_name,
                 "scenario": scenario_name,
                 "genre": genre,
                 "fidelity": fidelity,
-                "remarks": remarks,
+                "remarks": remarks, # Store full remarks
+                "display_remarks": display_remarks, # Store short remarks
                 "artist": artist,
                 "track": track,
                 "duration": f"{duration:.2f}s"
             })
             print(f"      ✅ Done in {duration:.2f}s")
 
-    # Cleanup audio
+    # Cleanup
     if audio_path and os.path.exists(audio_path):
-        try:
-            os.remove(audio_path)
-        except OSError:
-            pass
+        os.remove(audio_path)
 
-    # Output Comparison
+    # Summary Table
     print("\n" + "=" * 120)
-    print(f"{'Model':<25} | {'Scenario':<22} | {'Genre':<20} | {'Fid.':<4} | {'Artist - Track'}")
+    print(f"{'Model':<25} | {'Scenario':<22} | {'Genre':<20} | {'Fid.':<4} | {'Reasoning'}")
     print("-" * 120)
     for res in results:
         if "error" in res:
              print(f"{res['model']:<25} | {res['scenario']:<22} | ERROR: {res['error']}")
         else:
-            artist_track = f"{res['artist']} - {res['track']}"
-            if len(artist_track) > 30:
-                artist_track = artist_track[:27] + "..."
-            print(f"{res['model']:<25} | {res['scenario']:<22} | {res['genre']:<20} | {res['fidelity']:<4} | {artist_track}")
-            print(f"   Reasoning: {res['remarks']}")
-            print(f"   Time: {res['duration']}")
-            print("-" * 120)
-
-    # Summary Table
+            print(f"{res['model']:<25} | {res['scenario']:<22} | {res['genre']:<20} | {res['fidelity']:<4} | {res['display_remarks']}")
+    
     print("\n" + "=" * 100)
     print(f"{'SUMMARY TABLE (Genre)':^100}")
     print("-" * 100)
-
-    scenarios_list = ["ID Only", "ID + Metadata", "ID + Metadata + Audio"]
+    
     header = f"{'Model':<25}"
-    for s in scenarios_list:
-        header += f" | {s:<22}"
+    for s in [x[0] for x in scenarios]: header += f" | {s:<22}"
     print(header)
     print("-" * len(header))
 
     for model_name in AI_MODELS:
         row_str = f"{model_name:<25}"
-        global_error = next((r for r in results if r["model"] == model_name and r.get("scenario") == "All"), None)
-        for s in scenarios_list:
-            if global_error:
-                val = "Init Failed"
-            else:
-                res = next((r for r in results if r["model"] == model_name and r.get("scenario") == s), None)
-                if res:
-                    if "error" in res:
-                        val = "ERROR"
-                    else:
-                        val = res.get("genre", "Unknown")
-                else:
-                    val = "-"
+        for s in [x[0] for x in scenarios]:
+            res = next((r for r in results if r["model"] == model_name and r.get("scenario") == s), None)
+            val = res.get("genre", "Unknown") if res and "error" not in res else "-"
             row_str += f" | {val:<22}"
         print(row_str)
 
