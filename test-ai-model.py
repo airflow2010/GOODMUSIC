@@ -136,7 +136,7 @@ def download_audio_for_analysis(video_id: str) -> str | None:
 #  AI LOGIC (Updated for google-genai SDK)
 # ---------------------------------------------------------------------------
 
-def predict_genre(client: genai.Client, model_name: str, video_id: str, video_title: str = None, video_description: str = None, audio_path: str = None) -> Optional[tuple[str, int, str, str, str]]:
+def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str], video_title: str = None, video_description: str = None, audio_path: str = None) -> Optional[tuple[str, int, str, str, str]]:
     """Uses Gemini (2.5 or 3.0) to predict genre, confidence, reasoning, artist, and track."""
     
     allowed_genres = [
@@ -146,7 +146,9 @@ def predict_genre(client: genai.Client, model_name: str, video_id: str, video_ti
     ]
 
     # 1. Construct the Prompt (Multimodal)
-    prompt_text = f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"
+    prompt_text = "Categorize the music genre of the song"
+    if video_id:
+        prompt_text += f" with YouTube Video ID '{video_id}'"
     if video_title: prompt_text += f", Title '{video_title}'"
     if video_description: prompt_text += f", Description '{video_description}'"
     
@@ -158,7 +160,7 @@ def predict_genre(client: genai.Client, model_name: str, video_id: str, video_ti
         '3. "remarks": Short reasoning.\n'
         '4. "artist": Artist name.\n'
         '5. "track": Song title.\n'
-        'IMPORTANT: Do not hallucinate. If you analyze audio, describe the instruments in the remarks.'
+        'IMPORTANT: Do not hallucinate. If you don\'t know, return "Unknown". remarks should be a short reasoning (1-2 sentences) describing how you came to your conclusion regarding the detected genre.'
     )
 
     contents = []
@@ -190,14 +192,29 @@ def predict_genre(client: genai.Client, model_name: str, video_id: str, video_ti
             thinking_level="HIGH"
         )
 
+    response = None
+    max_retries = 3
+    retry_delay = 10
+
+    for attempt in range(max_retries + 1):
+        try:
+            # 3. Generate Content
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config
+            )
+            break
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                if attempt < max_retries:
+                    print(f"      ⚠️ Quota exceeded. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+            return "Unknown", 0, f"API Error: {str(e)}", "", ""
+
     try:
-        # 3. Generate Content
-        response = client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=config
-        )
-        
         # 4. Extract "Thoughts" (Gemini 3 specific)
         thoughts_text = ""
         # The new SDK parses candidates differently. We look for thought parts.
@@ -239,7 +256,7 @@ def predict_genre(client: genai.Client, model_name: str, video_id: str, video_ti
         return genre, fidelity, remarks, artist, track
 
     except Exception as e:
-        return "Unknown", 0, f"API Error: {str(e)}", "", ""
+        return "Unknown", 0, f"Processing Error: {str(e)}", "", ""
 
 # ---------------------------------------------------------------------------
 #  MAIN LOOP
@@ -291,9 +308,10 @@ def main():
     results = []
     
     scenarios = [
-        ("ID Only", False, False),
+        # ("ID Only", False, False),
         ("ID + Metadata", True, False),
-        ("ID + Metadata + Audio", True, True)
+        ("ID + Metadata + Audio", True, True),
+        ("Audio Only", False, True),
     ]
 
     for model_name in AI_MODELS:
@@ -316,41 +334,31 @@ def main():
             d = description if use_meta else None
             a = audio_path if use_audio else None
             
-            genre, fidelity, remarks, artist, track = predict_genre(client, model_name, args.video_id, t, d, a)
+            vid_arg = args.video_id
+            if scenario_name == "Audio Only":
+                vid_arg = None
+
+            genre, fidelity, remarks, artist, track = predict_genre(client, model_name, vid_arg, t, d, a)
             duration = time.time() - start_time
             
-            # Shorten remarks for display if they contain long thoughts
-            display_remarks = remarks
-            if len(display_remarks) > 100:
-                display_remarks = display_remarks[:97] + "..."
-
             results.append({
                 "model": model_name,
                 "scenario": scenario_name,
                 "genre": genre,
                 "fidelity": fidelity,
                 "remarks": remarks, # Store full remarks
-                "display_remarks": display_remarks, # Store short remarks
                 "artist": artist,
                 "track": track,
                 "duration": f"{duration:.2f}s"
             })
-            print(f"      ✅ Done in {duration:.2f}s")
+            print(f"      ✅ Done in {duration:.2f}s (Artist: {artist})")
+            print(f"      📝 Remarks: {remarks}")
 
     # Cleanup
     if audio_path and os.path.exists(audio_path):
         os.remove(audio_path)
 
     # Summary Table
-    print("\n" + "=" * 120)
-    print(f"{'Model':<25} | {'Scenario':<22} | {'Genre':<20} | {'Fid.':<4} | {'Reasoning'}")
-    print("-" * 120)
-    for res in results:
-        if "error" in res:
-             print(f"{res['model']:<25} | {res['scenario']:<22} | ERROR: {res['error']}")
-        else:
-            print(f"{res['model']:<25} | {res['scenario']:<22} | {res['genre']:<20} | {res['fidelity']:<4} | {res['display_remarks']}")
-    
     print("\n" + "=" * 100)
     print(f"{'SUMMARY TABLE (Genre)':^100}")
     print("-" * 100)
