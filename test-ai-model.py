@@ -238,6 +238,19 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
             # Fallback if strict JSON mode failed
             return "Unknown", 0, f"JSON Parse Error. Raw: {text[:50]}...", "", ""
 
+        # --- FIX STARTS HERE ---
+        # Handle case where model returns a list [ { "genre": ... } ] instead of { "genre": ... }
+        if isinstance(parsed, list):
+            if len(parsed) > 0 and isinstance(parsed[0], dict):
+                parsed = parsed[0]
+            else:
+                return "Unknown", 0, "Processing Error: Model returned an empty or invalid list.", "", ""
+        
+        # Ensure parsed is actually a dict before calling .get()
+        if not isinstance(parsed, dict):
+             return "Unknown", 0, "Processing Error: Model returned valid JSON but not an object.", "", ""
+        # --- FIX ENDS HERE ---
+
         genre = parsed.get("genre", "Unknown")
         if genre not in allowed_genres and genre != "Unknown":
             genre = "Unknown"
