@@ -5,6 +5,8 @@ import time
 import sys
 import google.auth
 from google.cloud import firestore
+from google.genai import types
+from pydantic import BaseModel, Field
 from ingestion import init_ai_model, AI_MODEL_NAME
 
 # ====== Configuration ======
@@ -12,9 +14,13 @@ COLLECTION_NAME = "musicvideos"
 ADC_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 MODEL_NAME = AI_MODEL_NAME
 
-def predict_artist_track(model, video_id: str, video_title: str) -> tuple[str, str]:
-    """Uses Gemini to predict artist and track based on metadata."""
-    if not model:
+class ArtistTrack(BaseModel):
+    artist: str = Field(description="The name of the artist or band.")
+    track: str = Field(description="The name of the song or track.")
+
+def predict_artist_track(client, video_id: str, video_title: str) -> tuple[str, str]:
+    """Uses Gemini to predict artist and track using Structured Outputs."""
+    if not client:
         return "", ""
     
     prompt_parts = [
@@ -23,15 +29,37 @@ def predict_artist_track(model, video_id: str, video_title: str) -> tuple[str, s
     if video_title:
         prompt_parts.append(f" and Title '{video_title}'")
     
-    prompt_parts.append("\n\nYour response must be a JSON object with the following keys:")
-    prompt_parts.append('1. "artist": A string containing the name of the artist or band.')
-    prompt_parts.append('2. "track": A string containing the name of the song or track.')
-    prompt_parts.append('\nExample response:\n{\n  "artist": "The Beatles",\n  "track": "Hey Jude"\n}')
+    prompt_parts.append("\nIMPORTANT: Do not hallucinate. If unknown, return empty strings.")
     
-    prompt_text = "".join(prompt_parts)
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=ArtistTrack
+    )
+
+    # Retry logic for quota issues
+    response = None
+    max_retries = 3
+    retry_delay = 10
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents="".join(prompt_parts),
+                config=config
+            )
+            break
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                if attempt < max_retries:
+                    print(f"      ⚠️ Quota exceeded. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+            print(f"      ⚠️ AI Error: {e}")
+            return "", ""
 
     try:
-        response = model.generate_content(prompt_text)
         cleaned_text = response.text.strip()
         # Remove markdown code blocks if present
         if cleaned_text.startswith("```json"):
@@ -42,10 +70,9 @@ def predict_artist_track(model, video_id: str, video_title: str) -> tuple[str, s
             cleaned_text = cleaned_text[:-3]
         
         data = json.loads(cleaned_text)
-        artist = data.get("artist", "")
-        track = data.get("track", "")
+        result = ArtistTrack(**data)
         
-        return artist, track
+        return result.artist, result.track
 
     except Exception as e:
         print(f"      ⚠️ AI Error: {e}")

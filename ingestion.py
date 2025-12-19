@@ -1,16 +1,22 @@
 import os
 import pickle
 import time
+import json
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional
 
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.cloud import firestore
+from google.cloud import secretmanager
 from googleapiclient.discovery import build
-import vertexai
-from vertexai.generative_models import GenerativeModel, Part
+from google import genai
+from google.genai import types
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 import yt_dlp
+
+load_dotenv()
 
 COLLECTION_NAME = "musicvideos"
 TOKEN_FILE = "token.pickle"
@@ -18,15 +24,45 @@ CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 # Centralized AI Model Configuration
-AI_MODEL_NAME = "gemini-2.5-flash"
+AI_MODEL_NAME = "gemini-3-flash-preview"
+
+class MusicAnalysis(BaseModel):
+    genre: str = Field(description="The music genre. Must be one of the allowed genres or 'Unknown'.")
+    fidelity: int = Field(description="Confidence score between 0 and 100.")
+    remarks: str = Field(description="Short reasoning (1-2 sentences) for the classification.")
+    artist: str = Field(description="The name of the artist, or empty string if unknown.")
+    track: str = Field(description="The name of the track, or empty string if unknown.")
+
+def get_gcp_secret(secret_id: str, project_id: str, version_id: str = "latest") -> Optional[str]:
+    """
+    Fetches a secret from Google Cloud Secret Manager.
+    Requires 'Secret Manager Secret Accessor' role.
+    """
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        print(f"⚠️  Could not fetch secret '{secret_id}': {e}")
+        return None
 
 def init_ai_model(project_id: str, location: str = "europe-west4", credentials=None):
-    """Initializes and returns the Vertex AI model using the centralized model name."""
+    """Initializes and returns the GenAI client using API Key (Env or Secret Manager)."""
+    api_key = os.environ.get("GOOGLE_API_KEY")
+
+    if not api_key:
+        print(f"   🔑 Env var not found. Fetching secret 'GOOGLE_API_KEY' from project '{project_id}'...")
+        api_key = get_gcp_secret("GOOGLE_API_KEY", project_id)
+
+    if not api_key:
+        print("⚠️  Error: Could not find API Key in environment or Secret Manager.")
+        return None
+
     try:
-        vertexai.init(project=project_id, location=location, credentials=credentials)
-        return GenerativeModel(AI_MODEL_NAME)
+        return genai.Client(api_key=api_key)
     except Exception as e:
-        print(f"⚠️ Vertex AI Init Error: {e}")
+        print(f"⚠️ GenAI Client Init Error: {e}")
         return None
 
 def parse_datetime(value: str | None) -> datetime | None:
@@ -176,7 +212,7 @@ def predict_genre(model, video_id: str, video_title: str) -> Optional[tuple[str,
 
     audio_path = download_audio_for_analysis(video_id)
     
-    # 1) Refrain from calling Vertex API if audio download failed
+    # 1) Refrain from calling AI-API if audio download failed
     if not audio_path:
         return None
 
@@ -189,59 +225,72 @@ def predict_genre(model, video_id: str, video_title: str) -> Optional[tuple[str,
     prompt_parts.append(
         ". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre."
     )
+
+    instruction_text = (
+        f'\n\nFor "genre", select ONE of {", ".join(allowed_genres)}. Use "Unknown" if unsure.\n'
+        'IMPORTANT: Do not hallucinate. If you don\'t know, return "Unknown".'
+    )
+
     try:
         with open(audio_path, "rb") as f:
-            audio_data = f.read()
-        parts.append(Part.from_data(data=audio_data, mime_type="audio/mp4"))
+            audio_bytes = f.read()
+        parts.append(types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp4"))
     except Exception:
         pass
 
-    # 2) Extra protection layer in prompt
-    prompt_parts.append(
-        "\n\nYour response must be a JSON object with the following keys:\n"
-        f'1. "genre": A string. Choose ONE of the following allowed genres: {", ".join(allowed_genres)}. '
-        'If the genre cannot be determined reliably, use "Unknown".\n'
-        '2. "fidelity": Integer 0-100 for confidence.\n'
-        '3. "remarks": Short reasoning.\n'
-        '4. "artist": Artist or band name.\n'
-        '5. "track": Song title.\n'
-        'IMPORTANT: Do not hallucinate. If you cannot determine the genre/artist/track from the audio, return "Unknown" and empty strings.'
+    parts.append(types.Part.from_text(text="".join(prompt_parts) + instruction_text))
+
+    # 2) Configure Thinking & Schema
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=MusicAnalysis
     )
 
-    parts.append("".join(prompt_parts))
+    if "gemini-3" in AI_MODEL_NAME:
+        config.thinking_config = types.ThinkingConfig(
+            include_thoughts=True,
+            thinking_level="HIGH"
+        )
+
+    # 3) Retry Logic
+    response = None
+    max_retries = 3
+    retry_delay = 10
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = model.models.generate_content(
+                model=AI_MODEL_NAME,
+                contents=parts,
+                config=config
+            )
+            break
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                if attempt < max_retries:
+                    print(f"      ⚠️ Quota exceeded. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+            return "Unknown", 0, f"API Error: {str(e)}", "", ""
 
     try:
-        response = model.generate_content(parts)
-        text = response.text or ""
-        import json
-        import html as htmllib
-
-        text = text.strip()
+        text = response.text.strip()
+        # Robust Markdown Cleaning
         if text.startswith("```json"):
-            text = text.strip("` \n")
-            text = text.replace("json", "", 1).strip()
-        parsed = json.loads(htmllib.unescape(text))
-        genre = parsed.get("genre", "Unknown") or "Unknown"
-        if not isinstance(genre, str):
-            genre = "Unknown"
+            text = text.replace("```json", "").replace("```", "").strip()
+        elif text.startswith("```"):
+            text = text.replace("```", "").strip()
+            
+        parsed = json.loads(text)
+        analysis = MusicAnalysis(**parsed)
+
+        genre = analysis.genre
         genre = genre.strip()
         if genre not in allowed_genres and genre != "Unknown":
             genre = "Unknown"
-
-        raw_fidelity = parsed.get("fidelity", 0)
-        fidelity = int(raw_fidelity) if isinstance(raw_fidelity, (int, float)) else 0
-        fidelity = max(0, min(100, fidelity))
-
-        remarks = parsed.get("remarks", "")
-        artist = parsed.get("artist", "")
-        track = parsed.get("track", "")
-        if not isinstance(remarks, str):
-            remarks = ""
-        if not isinstance(artist, str):
-            artist = ""
-        if not isinstance(track, str):
-            track = ""
-        return genre, fidelity, remarks, artist, track
+        
+        return genre, analysis.fidelity, analysis.remarks, analysis.artist, analysis.track
     except Exception as e:
         return "Unknown", 0, str(e), "", ""
     finally:
