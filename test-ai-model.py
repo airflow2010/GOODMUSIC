@@ -20,11 +20,18 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import yt_dlp
 
+# --- ADDED: SECRET MANAGER & DOTENV ---
+from google.cloud import secretmanager
+import google.auth.exceptions
+from dotenv import load_dotenv
+
+# Load environment variables immediately
+load_dotenv()
+
 TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
-# Updated Model List
 AI_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
@@ -47,6 +54,21 @@ class MusicAnalysis(BaseModel):
 # ---------------------------------------------------------------------------
 #  HELPER FUNCTIONS (YouTube, Audio, Time)
 # ---------------------------------------------------------------------------
+
+# --- ADDED: SECRET MANAGER HELPER ---
+def get_gcp_secret(secret_id: str, project_id: str, version_id: str = "latest") -> Optional[str]:
+    """
+    Fetches a secret from Google Cloud Secret Manager.
+    Requires 'Secret Manager Secret Accessor' role.
+    """
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        print(f"⚠️  Could not fetch secret '{secret_id}': {e}")
+        return None
 
 def parse_datetime(value: str | None) -> datetime | None:
     """Parse various ISO-ish date strings into timezone-aware datetimes."""
@@ -254,8 +276,6 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
         fidelity = analysis.fidelity
         
         remarks = analysis.remarks
-        if thoughts_text:
-            remarks = f"{thoughts_text.strip()} || Final: {remarks}"
 
         return genre, fidelity, remarks, analysis.artist, analysis.track
 
@@ -270,19 +290,33 @@ def main():
     parser = argparse.ArgumentParser(description="Test AI models for music genre categorization.")
     parser.add_argument("video_id", help="YouTube Video ID")
     parser.add_argument("--project", default="goodmusic-470520", help="Google Cloud Project ID")
-    parser.add_argument("--location", default="global", help="Vertex AI Location")
+    # --- ADDED: Arg for secret name ---
+    parser.add_argument("--secret_name", default="GOOGLE_API_KEY", help="Name of the secret in Secret Manager")
+    parser.add_argument("--location", default="global", help="Vertex AI Location") # Kept to avoid breaking existing args, though unused for AI Studio
     args = parser.parse_args()
-
-    # Init GenAI Client
-    try:
-        client = genai.Client(vertexai=True, project=args.project, location=args.location)
-    except Exception as e:
-        print(f"❌ Client Init Error: {e}")
-        sys.exit(1)
 
     print(f"🚀 Testing AI Models for Video ID: {args.video_id}")
     print(f"   Project: {args.project}")
     print(f"   Location: {args.location}")
+
+    # --- CHANGED: API Key Logic (Env -> Secret -> Fail) ---
+    api_key = os.environ.get("GOOGLE_API_KEY")
+
+    if not api_key:
+        print(f"   🔑 Env var not found. Fetching secret '{args.secret_name}' from project '{args.project}'...")
+        api_key = get_gcp_secret(args.secret_name, args.project)
+
+    if not api_key:
+        print("❌ Error: Could not find API Key in environment or Secret Manager.")
+        sys.exit(1)
+
+    # Init GenAI Client with API Key
+    try:
+        client = genai.Client(api_key=api_key)
+        print("✅ GenAI Client initialized successfully (AI Studio Mode).")
+    except Exception as e:
+        print(f"❌ Client Init Error: {e}")
+        sys.exit(1)
 
     # YouTube Metadata
     youtube = get_youtube_service()
@@ -355,7 +389,7 @@ def main():
                 "duration": f"{duration:.2f}s"
             })
             print(f"      ✅ Done in {duration:.2f}s (Artist: {artist}, Genre: {genre})")
-            print(f"      📝 Remarks: {remarks[:100]}..." if len(remarks) > 100 else f"      📝 Remarks: {remarks}")
+            print(f"      📝 Remarks: {remarks}")
 
     # Cleanup
     if audio_path and os.path.exists(audio_path):

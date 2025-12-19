@@ -4,6 +4,7 @@ google-api-python-client
 google-auth-oauthlib
 google-cloud-aiplatform
 google-cloud-firestore==2.13.1
+google-cloud-secret-manager
 
 # Web Scraping
 requests>=2.27
