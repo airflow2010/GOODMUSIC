@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional
 
+import google.auth
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.cloud import firestore
@@ -63,6 +64,24 @@ def init_ai_model(project_id: str, location: str = "europe-west4", credentials=N
         return genai.Client(api_key=api_key)
     except Exception as e:
         print(f"⚠️ GenAI Client Init Error: {e}")
+        return None
+
+def init_firestore_db(project_id: Optional[str] = None) -> Optional[firestore.Client]:
+    """Initializes and returns the Firestore Client using ADC."""
+    try:
+        # Get default credentials
+        creds, calculated_project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        
+        # Determine final project ID: Argument > Env Var > ADC Default
+        final_project_id = project_id or os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT") or calculated_project_id
+        
+        if not final_project_id:
+            print("⚠️  Error: Could not determine Google Cloud Project ID.")
+            return None
+
+        return firestore.Client(project=final_project_id, credentials=creds)
+    except Exception as e:
+        print(f"⚠️  Firestore Init Error: {e}")
         return None
 
 def parse_datetime(value: str | None) -> datetime | None:

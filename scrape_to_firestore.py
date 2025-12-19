@@ -14,14 +14,10 @@ from bs4 import BeautifulSoup
 import google.auth
 from google.cloud import firestore
 
-from ingestion import get_youtube_service, ingest_video_batch, parse_datetime, init_ai_model, AI_MODEL_NAME
+from ingestion import get_youtube_service, ingest_video_batch, parse_datetime, init_ai_model, init_firestore_db, AI_MODEL_NAME
 
 # ====== Configuration ======
 YOUTUBE_ID_RE = r"[A-Za-z0-9_-]{11}"
-# ADC Scopes (for Firestore & Vertex AI)
-ADC_SCOPES = [
-    "https://www.googleapis.com/auth/cloud-platform"
-]
 
 # ====== HTML Parsing (Reused from your script) ======
 def extract_title_from_html_text(html_text: str) -> str | None:
@@ -196,23 +192,15 @@ def main():
     parser.add_argument("--limit-new-db-entries", type=int, default=0, help="Limit new DB entries to add (0 for all)")
     args = parser.parse_args()
 
-    # 1. Auth & Clients
-    # Use Application Default Credentials (ADC) - works locally with `gcloud auth application-default login` and on Cloud Run automatically
-    try:
-        creds, project_id = google.auth.default(scopes=ADC_SCOPES)
-        if args.project:
-            project_id = args.project
-    except Exception as e:
-        print(f"❌ Auth Error: {e}")
+    print(f"🚀 Initializing for Project: {args.project or 'Default'}")
+    
+    # 1. Firestore
+    db = init_firestore_db(args.project)
+    if not db:
         sys.exit(1)
     
-    print(f"🚀 Initializing for Project: {project_id}")
-    
-    # Firestore
-    db = firestore.Client(project=project_id, credentials=creds)
-    
-    # Vertex AI
-    model = init_ai_model(project_id, credentials=creds)
+    # 2. AI Model
+    model = init_ai_model(db.project)
     model_name = AI_MODEL_NAME
     
     # YouTube API (using OAuth 2.0 flow)

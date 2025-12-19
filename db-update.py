@@ -7,11 +7,10 @@ import google.auth
 from google.cloud import firestore
 from google.genai import types
 from pydantic import BaseModel, Field
-from ingestion import init_ai_model, AI_MODEL_NAME
+from ingestion import init_ai_model, init_firestore_db, AI_MODEL_NAME
 
 # ====== Configuration ======
 COLLECTION_NAME = "musicvideos"
-ADC_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 MODEL_NAME = AI_MODEL_NAME
 
 class ArtistTrack(BaseModel):
@@ -83,27 +82,19 @@ def main():
     parser.add_argument("--project", help="Google Cloud Project ID")
     args = parser.parse_args()
 
-    # 1. Auth & Clients
-    try:
-        creds, project_id = google.auth.default(scopes=ADC_SCOPES)
-        if args.project:
-            project_id = args.project
-    except Exception as e:
-        print(f"❌ Auth Error: {e}")
+    print(f"🚀 Initializing for Project: {args.project or 'Default'}")
+    
+    # 1. Initialize Firestore
+    db = init_firestore_db(args.project)
+    if not db:
+        print("❌ Failed to initialize Firestore.")
         sys.exit(1)
     
-    print(f"🚀 Initializing for Project: {project_id}")
-    
-    # Firestore
-    try:
-        db = firestore.Client(project=project_id, credentials=creds)
-    except Exception as e:
-        print(f"❌ Firestore Init Error: {e}")
-        sys.exit(1)
-    
-    # Vertex AI
-    model = init_ai_model(project_id, credentials=creds)
+    # 2. Initialize AI
+    # Note: We pass db.project to ensure AI uses the same project context if needed for secrets
+    model = init_ai_model(db.project)
     if not model:
+        print("❌ Failed to initialize AI model.")
         sys.exit(1)
 
     print(f"🔍 Scanning collection '{COLLECTION_NAME}' for documents with missing fields...")

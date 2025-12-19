@@ -10,14 +10,10 @@ from flask import Flask, render_template, request, redirect, url_for, Response, 
 from google.cloud import firestore
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
-from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, AI_MODEL_NAME
+from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, init_firestore_db, AI_MODEL_NAME
 
 load_dotenv()
 
-# --- Configuration ---
-# Get the project ID from the environment variable.
-# This is set automatically when running on Google Cloud.
-PROJECT_ID = os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT")
 COLLECTION_NAME = "musicvideos"
 
 # --- Authentication Configuration ---
@@ -27,8 +23,6 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD")
 def check_prerequisites():
     """Checks for prerequisites for successful deployment and refuses to start if not met."""
     missing_vars = []
-    if not PROJECT_ID:
-        missing_vars.append("PROJECT_ID (or GCP_PROJECT)")
     if not AUTH_USERNAME:
         missing_vars.append("AUTH_USERNAME")
     if not AUTH_PASSWORD:
@@ -68,7 +62,6 @@ def check_prerequisites():
             print(f"   - {t}")
         sys.exit(1)
 
-    print(f"✅ Configuration loaded for Project ID: {PROJECT_ID}")
 
 def check_firestore_access(db_client):
     """Verifies access to the specific collection and warns if empty."""
@@ -116,18 +109,19 @@ VIDEO_RATINGS = {
 app = Flask(__name__)
 
 # --- Firestore Client Initialization ---
-try:
-    db = firestore.Client(project=PROJECT_ID)
-except Exception as e:
+db = init_firestore_db() # Let the function find the Project ID automatically
+
+if not db:
     print("\n" + "!" * 60)
     print("❌ STARTUP ERROR: Could not connect to Firestore.")
     print("!" * 60)
-    print(f"Error details: {e}")
     print("\nINSTRUCTIONS:")
     print("   1. Check if the Google Cloud Project ID is correct.")
     print("   2. Ensure the Service Account has 'Cloud Datastore User' or 'Firestore User' role.")
     print("   3. If running locally, check your 'gcloud auth application-default login' credentials.")
     sys.exit(1)
+
+print(f"✅ Configuration loaded for Project ID: {db.project}")
 
 # Verify collection access
 check_firestore_access(db)
@@ -632,7 +626,7 @@ def import_playlist():
             return
 
         # Initialize AI model for consistency
-        model = init_ai_model(PROJECT_ID)
+        model = init_ai_model(db.project)
 
         if limit and limit > 0:
             ids = ids[:limit]
@@ -698,7 +692,7 @@ def import_video():
         added = exists = unavailable = errors = 0
         
         # Initialize AI model for consistency
-        model = init_ai_model(PROJECT_ID)
+        model = init_ai_model(db.project)
 
         for idx, vid in enumerate(ids, start=1):
             result = ingest_single_video(
@@ -744,7 +738,7 @@ def run_scraper():
         # -u forces unbuffered binary stdout/stderr, allowing real-time streaming.
         cmd = [
             sys.executable, '-u', 'scrape_to_firestore.py',
-            '--project', PROJECT_ID,
+            '--project', db.project,
             '--limit-substack-posts', limit_posts,
             '--limit-new-db-entries', limit_entries,
             '--substack', substack_url
