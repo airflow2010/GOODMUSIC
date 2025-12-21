@@ -111,6 +111,9 @@ def main():
 
         print("   🤖 AI evaluation complete.")
 
+        # Always show the link for easy verification
+        print(f"   - Link: https://www.youtube.com/watch?v={video_id}")
+
         # 6. Evaluate the result and ask for confirmation
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
         updates = {}
@@ -130,7 +133,6 @@ def main():
                 }
         else:  # Genre is different
             print("   - ❗ Genre classified differently!")
-            print(f"   - Link: https://www.youtube.com/watch?v={video_id}")
             print(f"   - From: '{old_genre}'")
             print(f"   - To:   '{new_genre}'")
             print("-" * 20)

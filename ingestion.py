@@ -419,7 +419,11 @@ def predict_genre(model, video_id: str, video_title: str, video_description: str
 
     instruction_text = (
         f'\n\nFor "genre", select ONE of {", ".join(allowed_genres)}. Use "Unknown" if unsure.\n'
-        'IMPORTANT: Do not hallucinate. If you don\'t know, return "Unknown".'
+        'The genre should be based PRIMARILY on the audio content. meta-data is just supplemental.\n'
+        'For "fidelity", provide a confidence score between 0 (guessing) and 100 (absolutely certain).\n'
+        'For "remarks", provide a brief reasoning (1-2 sentences) for your classification.\n'
+        'For "artist" and "track", provide the most likely names, or leave empty if unknown.\n'
+        'Do not hallucinate. If you don\'t know, return "Unknown".'
     )
 
     try:
