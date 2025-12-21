@@ -8,6 +8,7 @@ __pycache__/
 *.log
 
 # Secrets and Credentials (NEVER COMMIT THESE)
+cookies.txt
 client_secret.json
 token.pickle
 .env

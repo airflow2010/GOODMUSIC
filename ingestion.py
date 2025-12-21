@@ -1,5 +1,6 @@
 import os
 import pickle
+import shutil
 import time
 import json
 from datetime import datetime, timezone
@@ -173,38 +174,206 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | Non
         return "", "", None
 
 
-def download_audio_for_analysis(video_id: str) -> str | None:
-    """Downloads the audio of a YouTube video to a temporary file for AI analysis."""
-    output_path = f"/tmp/{video_id}.m4a"
+def select_best_audio_format(formats: list, max_size_mb: int = 25) -> Optional[str]:
+    """Selects the best audio format under a given size, handling unknown sizes."""
 
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+    def get_filesize(f):
+        # filesize_approx is often available when filesize is not
+        return f.get("filesize") or f.get("filesize_approx")
 
-    ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio",
-        "outtmpl": output_path,
+    # Debug: Print all available formats to understand what yt-dlp sees
+    print(f"   🔍 Inspecting {len(formats)} available formats:")
+    for f in formats:
+        f_size = get_filesize(f)
+        size_str = f"{round(f_size / (1024*1024), 2)}MB" if f_size else "Unknown size"
+        print(f"      - {f.get('format_id')}: {f.get('ext')} | {f.get('resolution')} | {size_str} | vcodec: {f.get('vcodec')} | acodec: {f.get('acodec')} | abr: {f.get('abr')}")
+
+    # --- Pass 1: Find audio-only formats ---
+    # More robust check: vcodec is 'none' or the key doesn't exist, but acodec must exist.
+    all_audio_formats = [
+        f
+        for f in formats
+        if (f.get("vcodec") == "none" or not f.get("vcodec")) and f.get("acodec") != "none"
+    ]
+
+    # 1a. Prefer audio-only formats with a known, suitable size
+    suitable_audio_known_size = [
+        f for f in all_audio_formats if get_filesize(f) and get_filesize(f) < max_size_mb * 1024 * 1024
+    ]
+    if suitable_audio_known_size:
+        suitable_audio_known_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
+        selected = suitable_audio_known_size[0]
+        print(
+            f"   ℹ️ Found suitable audio-only format with known size: {selected['format_id']} ({selected.get('abr')}k, {round(get_filesize(selected) / (1024*1024), 2)}MB)"
+        )
+        return selected["format_id"]
+
+    # 1b. If none, take a chance on an audio-only format with unknown size (they are usually small)
+    audio_unknown_size = [f for f in all_audio_formats if not get_filesize(f)]
+    if audio_unknown_size:
+        audio_unknown_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
+        selected = audio_unknown_size[0]
+        print(
+            f"   ℹ️ Found audio-only format with unknown size. Selecting best bitrate: {selected['format_id']} ({selected.get('abr')}k)"
+        )
+        return selected["format_id"]
+
+    # --- Pass 2: Find video+audio formats as a fallback ---
+    all_video_formats = [
+        f
+        for f in formats
+        if f.get("vcodec") != "none" and f.get("acodec") != "none"
+    ]
+
+    # 2a. Prefer video+audio formats with a known, suitable size and low resolution
+    suitable_video_known_size = [
+        f for f in all_video_formats
+        if get_filesize(f) and get_filesize(f) < max_size_mb * 1024 * 1024 and f.get("height", float("inf")) <= 480
+    ]
+    if suitable_video_known_size:
+        suitable_video_known_size.sort(key=lambda f: (f.get("height", 0) or 0, f.get("abr", 0) or 0), reverse=True)
+        selected = suitable_video_known_size[0]
+        print(
+            f"   ℹ️ No small audio-only format found. Falling back to video format with known size: {selected['format_id']} ({selected.get('height')}p, {round(get_filesize(selected) / (1024*1024), 2)}MB)"
+        )
+        return selected["format_id"]
+
+    # 2b. If none, take a chance on a low-resolution video+audio format with unknown size
+    video_unknown_size_low_res = [
+        f for f in all_video_formats if not get_filesize(f) and f.get("height", float("inf")) <= 480
+    ]
+    if video_unknown_size_low_res:
+        # Sort ascending by height to pick the SMALLEST resolution as a safer bet when size is unknown.
+        video_unknown_size_low_res.sort(key=lambda f: (f.get("height", 0) or 0, f.get("abr", 0) or 0))
+        selected = video_unknown_size_low_res[0]  # The first one is now the smallest
+        print(
+            f"   ℹ️ No small audio-only format found. Falling back to low-res video format with unknown size: {selected['format_id']} ({selected.get('height')}p)"
+        )
+        return selected["format_id"]
+
+    # 3. If still nothing, return None to use the broad fallback.
+    return None
+
+
+def _attempt_download(video_id: str, use_cookies: bool) -> Optional[str]:
+    """A single download attempt, with or without cookies."""
+    # The final file will be .m4a after conversion
+    target_m4a_path = f"/tmp/{video_id}.m4a"
+    has_ffmpeg = shutil.which("ffmpeg") is not None
+
+    # --- Step 1: Get video info without downloading ---
+    info_opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "max_filesize": 25 * 1024 * 1024,
+    }
+    if use_cookies and os.path.exists("cookies.txt"):
+        info_opts["cookiefile"] = "cookies.txt"
+
+    info = None
+    try:
+        with yt_dlp.YoutubeDL(info_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    except Exception as e:
+        print(f"     - ⚠️ Could not fetch video formats: {e}")
+        return None
+
+    if not info or "formats" not in info:
+        print("     - ⚠️ No format information found.")
+        return None
+
+    # --- Step 2: Select the best format ---
+    selected_format_id = select_best_audio_format(info["formats"], max_size_mb=25)
+
+    format_selector = selected_format_id
+    if not format_selector:
+        print(
+            "     - ⚠️ No suitable small format found, falling back to 'bestaudio/best'. This might download a large file."
+        )
+        format_selector = "bestaudio/best"
+
+    # --- Step 3: Download the selected format and extract audio ---
+    ydl_opts = {
+        "format": format_selector,
+        "outtmpl": f"/tmp/{video_id}.%(ext)s",
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "max_filesize": 100 * 1024 * 1024,
     }
 
-    # Attempt to use cookies if available to bypass bot detection (especially on Cloud Run)
-    if os.path.exists("cookies.txt"):
+    if has_ffmpeg:
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "m4a",
+                "preferredquality": "128",
+            }
+        ]
+    else:
+        print("     - ⚠️ FFmpeg not found. Skipping audio conversion. Downloading raw format.")
+
+    if use_cookies and os.path.exists("cookies.txt"):
         ydl_opts["cookiefile"] = "cookies.txt"
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+            # extract_info with download=True returns the info dict *after* download/processing
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+            
+            # If ffmpeg was used, we expect the .m4a file
+            if has_ffmpeg and os.path.exists(target_m4a_path):
+                print(f"     - ✅ Successfully downloaded and converted audio to {target_m4a_path}")
+                return target_m4a_path
+            
+            # If no ffmpeg, or conversion failed, find the actual downloaded file
+            if "requested_downloads" in info:
+                filepath = info["requested_downloads"][0]["filepath"]
+            else:
+                filepath = ydl.prepare_filename(info)
 
-        if os.path.exists(output_path):
-            return output_path
-    except Exception:
+            if os.path.exists(filepath):
+                print(f"     - ✅ Successfully downloaded audio (raw) to {filepath}")
+                return filepath
+            
+            print(f"     - ⚠️ Download appeared to succeed, but file '{filepath}' was not found.")
+            return None
+
+    except Exception as e:
+        print(f"     - ⚠️ Audio download failed: {e}")
         return None
 
+    return None
+
+
+def download_audio_for_analysis(video_id: str) -> str | None:
+    """
+    Downloads the audio of a YouTube video to a temporary file for AI analysis.
+    It first tries un-authenticated, then falls back to using cookies if that fails.
+    """
+    # Clean up any previous attempts to ensure a fresh start
+    for ext in ['.webm', '.mp4', '.m4a', '.m4a.part', '.part']:
+        temp_file = f"/tmp/{video_id}{ext}"
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+
+    # --- Attempt 1: Un-authenticated ---
+    print("   - Attempting download without authentication...")
+    download_path = _attempt_download(video_id, use_cookies=False)
+    if download_path:
+        return download_path
+
+    # --- Attempt 2: Authenticated (if cookies exist) ---
+    if os.path.exists("cookies.txt"):
+        print("\n   - Un-authenticated download failed. Retrying with authentication (cookies)...")
+        download_path = _attempt_download(video_id, use_cookies=True)
+        if download_path:
+            return download_path
+
+    print("   - Both un-authenticated and authenticated download attempts failed.")
     return None
 
 
@@ -256,7 +425,18 @@ def predict_genre(model, video_id: str, video_title: str, video_description: str
     try:
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
-        parts.append(types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp4"))
+        
+        # Determine mime_type based on extension
+        ext = os.path.splitext(audio_path)[1].lower().replace(".", "")
+        mime_type = "audio/mp4" # default
+        if ext == "webm":
+            mime_type = "audio/webm"
+        elif ext == "mp3":
+            mime_type = "audio/mpeg"
+        elif ext == "wav":
+            mime_type = "audio/wav"
+            
+        parts.append(types.Part.from_bytes(data=audio_bytes, mime_type=mime_type))
     except Exception:
         pass
 

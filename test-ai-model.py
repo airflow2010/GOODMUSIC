@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 import google.auth
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-import yt_dlp
 
 # --- ADDED: SECRET MANAGER & DOTENV ---
 from google.cloud import secretmanager
@@ -27,6 +26,8 @@ from dotenv import load_dotenv
 
 # Load environment variables immediately
 load_dotenv()
+
+from ingestion import download_audio_for_analysis
 
 TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
@@ -134,39 +135,6 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | Non
             return None
     except Exception:
         return "", "", None
-
-def download_audio_for_analysis(video_id: str) -> str | None:
-    """Downloads the audio of a YouTube video to a temporary file."""
-    output_path = f"/tmp/{video_id}.m4a"
-
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
-
-    ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio",
-        "outtmpl": output_path,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "max_filesize": 25 * 1024 * 1024,
-    }
-
-    if os.path.exists("cookies.txt"):
-        ydl_opts["cookiefile"] = "cookies.txt"
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-
-        if os.path.exists(output_path):
-            return output_path
-    except Exception:
-        return None
-
-    return None
 
 # ---------------------------------------------------------------------------
 #  AI LOGIC (Updated for Structured Outputs)
