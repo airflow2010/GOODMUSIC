@@ -57,7 +57,9 @@ def main():
 
     youtube = get_youtube_service()
     if not youtube:
-        print("⚠️ Could not authenticate with YouTube API. Will proceed without fetching fresh metadata.")
+        print("❌ Could not authenticate with YouTube API. Aborting script.")
+        print("   Please run `rm token.pickle` and re-run the script to re-authenticate.")
+        sys.exit(1)
     else:
         print("✅ Connected to YouTube API.")
 

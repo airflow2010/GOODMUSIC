@@ -288,17 +288,19 @@ def main():
 
     # YouTube Metadata
     youtube = get_youtube_service()
+    if not youtube:
+        print("❌ YouTube API not available. Aborting test.")
+        print("   Please run `rm token.pickle` and re-run the script to re-authenticate.")
+        sys.exit(1)
+
     title = ""
     description = ""
-    if youtube:
-        metadata = get_video_metadata(youtube, args.video_id)
-        if metadata:
-            title, description, _ = metadata
-            print(f"   Video Title: {title}")
-        else:
-            print("   ⚠️ Could not fetch video metadata.")
+    metadata = get_video_metadata(youtube, args.video_id)
+    if metadata:
+        title, description, _ = metadata
+        print(f"   Video Title: {title}")
     else:
-        print("   ⚠️ YouTube API not available.")
+        print("   ⚠️ Could not fetch video metadata.")
 
     # Download Audio
     print("   Downloading audio for analysis...")

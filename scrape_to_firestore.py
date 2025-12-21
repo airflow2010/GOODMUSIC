@@ -203,19 +203,21 @@ def main():
     model = init_ai_model(db.project)
     model_name = AI_MODEL_NAME
     
-    # YouTube API (using OAuth 2.0 flow)
+    # 3. YouTube API (using OAuth 2.0 flow)
     youtube = get_youtube_service()
     if not youtube:
-        print("⚠️ Could not authenticate with YouTube API. Video titles will not be fetched.")
+        print("❌ Could not authenticate with YouTube API. Aborting scraper.")
+        print("   Please run `rm token.pickle` and re-run the script to re-authenticate.")
+        sys.exit(1)
 
-    # 2. Fetch Posts
+    # 4. Fetch Posts
     print(f"📥 Fetching posts from {args.substack}...")
     posts = fetch_substack_posts_json(args.substack, limit_per_page=20)
     
     if args.limit_substack_posts > 0:
         posts = posts[:args.limit_substack_posts]
 
-    # 3. Process
+    # 5. Process
     print(f"🔄 Processing {len(posts)} posts...")
     total_new_entries = 0
     for i, post in enumerate(posts):
