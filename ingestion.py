@@ -150,10 +150,10 @@ def fetch_playlist_video_ids(yt, playlist_id: str) -> List[str]:
     return ids
 
 
-def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | None:
-    """Fetches video title and upload date from YouTube API to help Gemini."""
+def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | None] | None:
+    """Fetches video title, description and upload date from YouTube API to help Gemini."""
     if not youtube:
-        return "", None
+        return "", "", None
     try:
         response = youtube.videos().list(part="snippet,status", id=video_id).execute()
         if "items" in response and len(response["items"]) > 0:
@@ -164,12 +164,13 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, datetime | None] | 
 
             snippet = item.get("snippet", {})
             title = snippet.get("title", "")
+            description = snippet.get("description", "")
             uploaded_at = parse_datetime(snippet.get("publishedAt"))
-            return title, uploaded_at
+            return title, description, uploaded_at
         else:
             return None
     except Exception:
-        return "", None
+        return "", "", None
 
 
 def download_audio_for_analysis(video_id: str) -> str | None:
@@ -207,7 +208,7 @@ def download_audio_for_analysis(video_id: str) -> str | None:
     return None
 
 
-def predict_genre(model, video_id: str, video_title: str) -> Optional[tuple[str, int, str, str, str]]:
+def predict_genre(model, video_id: str, video_title: str, video_description: str = "") -> Optional[tuple[str, int, str, str, str]]:
     """Uses Gemini to predict genre, confidence, reasoning, artist, and track."""
     if not model:
         return "Unknown", 0, "AI model not available.", "", ""
@@ -240,6 +241,8 @@ def predict_genre(model, video_id: str, video_title: str) -> Optional[tuple[str,
     prompt_parts = [f"Categorize the music genre of the song with YouTube Video ID '{video_id}'"]
     if video_title:
         prompt_parts.append(f" and Title '{video_title}'")
+    if video_description:
+        prompt_parts.append(f" and Description '{video_description}'")
 
     prompt_parts.append(
         ". I have provided the audio file. Please listen to the rhythm, instrumentation, and vocals to determine the genre."
@@ -343,8 +346,8 @@ def ingest_single_video(
     if metadata is None:
         return {"status": "unavailable", "message": "Video is private or unavailable."}
 
-    title, date_youtube = metadata
-    prediction = predict_genre(model, video_id, title)
+    title, description, date_youtube = metadata
+    prediction = predict_genre(model, video_id, title, description)
 
     if prediction is None:
         return {
