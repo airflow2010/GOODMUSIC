@@ -3,7 +3,7 @@ import json
 import os
 import pickle
 import sys
-import time
+import time, concurrent.futures
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -250,6 +250,51 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
     except Exception as e:
         return "Unknown", 0, f"Processing Error: {str(e)}", "", ""
 
+def run_prediction_task(task_args):
+    """Helper function to unpack arguments and run a single prediction task in a thread."""
+    (client, model_name, scenario_name, use_meta, use_audio, video_id, title, description, audio_path) = task_args
+
+    print(f"   ▶️  Starting test: {model_name} ({scenario_name})")
+
+    if use_audio and not audio_path:
+        print(f"   ⚠️  Skipping {scenario_name} for {model_name}: Audio not available.")
+        return {
+            "model": model_name,
+            "scenario": scenario_name,
+            "error": "Audio not available"
+        }
+
+    start_time = time.time()
+    
+    vid_arg = video_id if scenario_name != "Audio Only" else None
+    title_arg = title if use_meta else None
+    desc_arg = description if use_meta else None
+    audio_arg = audio_path if use_audio else None
+
+    try:
+        genre, fidelity, remarks, artist, track = predict_genre(client, model_name, vid_arg, title_arg, desc_arg, audio_arg)
+        duration = time.time() - start_time
+        
+        result = {
+            "model": model_name,
+            "scenario": scenario_name,
+            "genre": genre,
+            "fidelity": fidelity,
+            "remarks": remarks,
+            "artist": artist,
+            "track": track,
+            "duration": f"{duration:.2f}s"
+        }
+        print(f"   ✅ Finished: {model_name} ({scenario_name}) in {duration:.2f}s -> (Genre: {genre}, Artist: {artist})")
+        return result
+    except Exception as e:
+        duration = time.time() - start_time
+        print(f"   ❌ FAILED: {model_name} ({scenario_name}) in {duration:.2f}s. Error: {e}")
+        return {
+            "model": model_name,
+            "scenario": scenario_name,
+            "error": str(e)
+        }
 # ---------------------------------------------------------------------------
 #  MAIN LOOP
 # ---------------------------------------------------------------------------
@@ -320,46 +365,32 @@ def main():
         ("ID + Metadata + Audio", True, True),
         ("Audio Only", False, True),
     ]
-
+    
+    # Create a list of all tasks to run
+    tasks = []
     for model_name in AI_MODELS:
-        print(f"\n🤖 Testing Model: {model_name}...")
-        
         for scenario_name, use_meta, use_audio in scenarios:
-            print(f"   👉 Scenario: {scenario_name}")
-            
-            if use_audio and not audio_path:
-                results.append({
-                    "model": model_name,
-                    "scenario": scenario_name,
-                    "error": "Audio not available"
-                })
-                continue
+            tasks.append(
+                (client, model_name, scenario_name, use_meta, use_audio, args.video_id, title, description, audio_path)
+            )
 
-            start_time = time.time()
-            
-            t = title if use_meta else None
-            d = description if use_meta else None
-            a = audio_path if use_audio else None
-            
-            vid_arg = args.video_id
-            if scenario_name == "Audio Only":
-                vid_arg = None
+    print(f"🤖 Starting parallel execution of {len(tasks)} tests...")
 
-            genre, fidelity, remarks, artist, track = predict_genre(client, model_name, vid_arg, t, d, a)
-            duration = time.time() - start_time
-            
-            results.append({
-                "model": model_name,
-                "scenario": scenario_name,
-                "genre": genre,
-                "fidelity": fidelity,
-                "remarks": remarks,
-                "artist": artist,
-                "track": track,
-                "duration": f"{duration:.2f}s"
-            })
-            print(f"      ✅ Done in {duration:.2f}s (Artist: {artist}, Genre: {genre})")
-            print(f"      📝 Remarks: {remarks}")
+    # Use a ThreadPoolExecutor to run tests in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+        # Submit all tasks and get future objects
+        future_to_task = {executor.submit(run_prediction_task, task): task for task in tasks}
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_task):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                task_info = future_to_task[future]
+                model_name = task_info[1]
+                scenario_name = task_info[2]
+                print(f"   ❌ An unexpected error occurred in task {model_name} ({scenario_name}): {exc}")
+                results.append({"model": model_name, "scenario": scenario_name, "error": f"Future exception: {exc}"})
 
     # Cleanup
     if audio_path and os.path.exists(audio_path):
