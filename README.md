@@ -1,6 +1,6 @@
 # GOODMUSIC prism
 
-Tools for collecting YouTube music videos from Substack, seeding a Firestore catalog, and rating/filtering videos via a small Flask UI & export collection to YouTube-playlists.
+Tools for collecting YouTube music videos from Substack or other sources, seeding a Firestore catalog, and rating/filtering videos via a small Flask UI & export collection to YouTube-playlists.
 
 Goal: Create your own MTV! 🎶
 
@@ -19,26 +19,40 @@ Goal: Create your own MTV! 🎶
 </table>
 
 ## Concept
-- Build YouTube playlists automatically from Substack archives or local HTML (deprecated)
-- Scrape Substack posts, extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection).
-- Optionally let Vertex AI guess the genre.
-- Rate and filter the catalog in a browser (play mode for discovery, rate mode for unrated items).
+- Ingest musicvideo: extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection). The source of the videos can be Substacks (this is how this project originated), YouTube playlists, or manual input of specific videos.
+- Ingestion also includes categorization of videos into genres
+  - This uses the publicly available AI-models of Google. This can be configured ([Configuration](#Configuration)).
+
+- Rate and filter the catalog in a browser (play mode for discovery, playback and export, rate mode for unrated items)
+- Import methods can be found in admin section
 - Export the desired selection (by filter) to YouTube-Playlist
 
 ## Repository layout
 
-- `prism-gui.py` — Flask app that renders the rating (`/rate`) and play (`/play`) pages using Firestore data.
-- `scrape_to_firestore.py` — Scrapes Substack posts, pulls YouTube metadata, predicts genres/artist/track (Vertex AI), and writes new videos to Firestore.
-- `scrape_to_YT-playlists.py` — Creates YouTube playlists from Substack archives or local HTML; tracks progress in `progress.json`. This script is deprecated and only included for historical reasons.
+- `prism-gui.py` — Flask app that renders the admin, rating (`/rate`), and play (`/play`) pages using Firestore data.
+- `scrape_to_firestore.py` — Scrapes Substack posts, pulls YouTube metadata, predicts genres/artist/track, and writes new videos to Firestore. This script can also be called from the GUI.
 - `templates/` — HTML templates for the Flask UI.
+- `static/` — CSS, JS, and static image assets.
+- `Dockerfile` — Container image build for deployment.
+- `update-google-cloud-run.sh` — Deployment helper for Cloud Run.
 - `requirements.txt` — Python dependencies.
+- `prism-ss-*.png` — UI screenshots.
+
+not needed except your are really curious:
+
+* `ingestion.py` — Shared ingestion helpers (Firestore init, YouTube auth, Gemini predictions, audio handling).
+
+- `update-genre.py` — Re-evaluates genre classification for existing Firestore docs.
+- `update-db-fields.py` — Backfills missing artist/track/ai_model fields in Firestore.
+- `test-ai-model.py` — CLI for comparing Gemini model outputs on sample videos.
 
 ## Prerequisites
 - Python 3.10+ and `pip`.
-- A Google Cloud project with these APIs enabled: Cloud Firestore, Vertex AI (optional for genre prediction), YouTube Data API v3.
+- A Google Cloud project with these APIs enabled: Cloud Firestore & YouTube Data API v3.
 - Firestore in Native mode with a collection named `musicvideos` (created automatically when seeding).
 - Google Cloud SDK (`gcloud`) installed for local Application Default Credentials.
 - YouTube OAuth 2.0 Client ID JSON (desktop type) downloaded as `client_secret.json` in the project root.
+- An API-Key for integration of AI functions (genre classification)
 
 ## Setup
 ```bash
@@ -93,7 +107,63 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
        --role="roles/secretmanager.secretAccessor"
    ```
 
+## Configuration
+
+### ingestion.py
+
+The variety of allowed genres for automated classification is restricted to the following genres per default.
+
+```python
+    allowed_genres = [
+        "Avant-garde & experimental",
+        "Blues",
+        "Classical",
+        "Country",
+        "Easy listening",
+        "Electronic",
+        "Folk",
+        "Hip hop",
+        "Jazz",
+        "Pop",
+        "R&B & soul",
+        "Rock",
+        "Metal",
+        "Punk",
+    ]
+```
+
+The AI-model which is used for classification is also defined in this file.
+
+```python
+AI_MODEL_NAME = "gemini-3-flash-preview"
+```
+
+### prism-gui.py
+
+The simple rating-system from 1 (worst) to 5 (best) can be labeled with descriptive texts:
+
+```python
+MUSIC_RATINGS = {
+    5: "5️⃣ 🤩 Masterpiece",
+    4: "4️⃣ 🙂 Strong",
+    3: "3️⃣ 😐 Decent",
+    2: "2️⃣ 🥱 Weak",
+    1: "1️⃣ 😖 Awful",
+}
+
+VIDEO_RATINGS = {
+    5: "5️⃣ 🤩 Visionary",
+    4: "4️⃣ 🙂 Creative",
+    3: "3️⃣ 😐 OK",
+    2: "2️⃣ 🥱 Meh",
+    1: "1️⃣ 😖 Unwatchable",
+}
+```
+
+
+
 ## Data model (Firestore `musicvideos`)
+
 Each document key is the YouTube `video_id` and stores fields like:
 - `title`, `source` (Substack URL), `genre`, `rating_music`, `rating_video`
 - `artist`, `track`, `ai_model`, `genre_ai_fidelity`, `genre_ai_remarks`
@@ -101,31 +171,6 @@ Each document key is the YouTube `video_id` and stores fields like:
 - `date_prism`, `date_substack`, `date_youtube`, `date_rated`
 
 ## Scripts
-
-### 0) Build YouTube playlists (deprecated)
-
-`scrape_to_YT-playlists.py` creates playlists from Substack or a local HTML file; remembers processed posts in `progress.json`.
-
-```bash
-# From Substack archive
-python scrape_to_YT-playlists.py --substack https://goodmusic.substack.com/archive \
-  --privacy private --limit 10 --sleep 0.2
-
-# From local HTML
-python scrape_to_YT-playlists.py path/to/file.html --privacy unlisted
-```
-
-Flags:
-
-- `--privacy private|unlisted|public`
-- `--dry-run` to inspect without creating playlists
-- `--limit` to cap posts/videos
-- `--sleep` to throttle API calls
-  Auth:
-- Requires `client_secret.json`; first run writes `token.pickle`.
-- Enable YouTube Data API v3 in your project.
-
-Note: This was the first iteration of my work on making GOODMUSIC better. I soon found out that there was no way around a "real" database where I can rate/classify the videos. This is what the other stuff is about.
 
 ### 1) Scrape Substack to Firestore
 `scrape_to_firestore.py` fetches posts, extracts video IDs, fetches YouTube metadata, lets Vertex AI guess genre/artist/track, and writes new docs.
@@ -170,11 +215,9 @@ You will get a dynamic URL which you can then use to access the app. You can map
 ## Operational tips
 
 - Quotas: YouTube inserts and playlist creation consume quota; the playlist script stops and cleans up on `quotaExceeded`.
-- Progress: `progress.json` prevents duplicate playlists; delete it if you want to rebuild everything.
 - Tokens: remove `token.pickle` to force a new YouTube OAuth flow.
 - Firestore indexes: filtering in the UI may require composite indexes if you add more complex queries; current filters use simple field filters.
 
 ## Troubleshooting
 - “Video unavailable” in the UI: check the console for YouTube player errors; embedding may be blocked or the video ID malformed.
 - Firestore permission errors: ensure the Firestore API is enabled and ADC credentials belong to a project with database access.
-- Vertex AI errors: the scraper will continue; genres become `Unknown`.
