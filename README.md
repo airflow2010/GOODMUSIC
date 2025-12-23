@@ -38,7 +38,7 @@ Goal: Create your own MTV! 🎶
 - `requirements.txt` — Python dependencies.
 - `prism-ss-*.png` — UI screenshots.
 
-not needed except your are really curious:
+not needed except if you are really curious:
 
 * `ingestion.py` — Shared ingestion helpers (Firestore init, YouTube auth, Gemini predictions, audio handling).
 
@@ -55,6 +55,11 @@ not needed except your are really curious:
 - An API-Key for integration of AI functions (genre classification)
 
 ## Setup
+
+### Python environment
+
+It is strongly recommended to first setup and test the complete setup locally. Local execution triggers some authentication and authorization processes which are then needed even when running the application completely in the cloud.
+
 ```bash
 git clone <this-repo>
 cd GOODMUSIC
@@ -63,7 +68,36 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Cloud Services
+
+Even when run locally, some components of the software are consumed from the cloud. Those have to be set up before starting the application.
+
+#### Google Cloud
+
+If you don't have yet a Google account, you have to set one up. Browse to [Google Cloud Console](https://console.cloud.google.com/) and create a new project.
+
+##### Firestore Database
+
+The application uses Firestore as the database. It's free for our usecase (the free tier gives enough allowance). You have to enable the services however for your project. Search for "firestore" and enable it.
+
+##### YouTube Data API v3
+
+We pull metadata from the YouTube API, which is why you have to enable it as well.
+
+Usage of this API is free, but note that you might run into quota limits of the API. This is especially true for playlist export, which consumes a lot of quota. In this case, you have to run the export several times over the course of several days. The application will continue export of playlists where it left.
+
+##### Google Cloud Run
+
+This component of the Google Cloud suite is needed only if you want to run this application completely in the cloud. After successful test of the functionality locally, you can run the script update-google-cloud-run.sh and the application will be uploaded into the Google Cloud and be available there to be spun up on demand if you use the app. Because of this concept, the costs of this service are ridiculously low (in the range of cents, less then 1 EUR/USD).
+
+##### Gemini API
+
+The API for the AI functions from Google is available in the Cloud Console as well. But the cheaper option is to create an API-key at [Google AI Studio](https://aistudio.google.com/) and use that. If you do it this way, you will get a certain quota of free API calls, only after depleting the free quota you will start paying for API calls. Costs for this API will only occur during ingesting (inserting) of new musicvideos into the collection). During rating/playing phase, no AI API calls will be made. When ingesting new videos, costs are depending on what model you choose. Right now I recommend gemini-3-flash-preview (default setting), which is fast and quite cheap. However if you ingest hundreds of even more videos into the database, in will cost several EUR/USD.
+
+It is highly recommended to set up a budget within Google Cloud Console to limit the maximum amount of costs.
+
 ### Authenticate
+
 - Google Cloud (Firestore/Vertex): `gcloud auth application-default login`
 - YouTube Data API: first run of the playlist or scrape scripts opens a browser OAuth flow; `token.pickle` will be written next to the scripts.
 - Set your project ID for the UI (and for scraping if you want to override ADC):
@@ -159,8 +193,6 @@ VIDEO_RATINGS = {
     1: "1️⃣ 😖 Unwatchable",
 }
 ```
-
-
 
 ## Data model (Firestore `musicvideos`)
 
