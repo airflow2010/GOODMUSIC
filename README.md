@@ -20,9 +20,8 @@ Goal: Create your own MTV! 🎶
 
 ## Concept
 - Ingest musicvideo: extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection). The source of the videos can be Substacks (this is how this project originated), YouTube playlists, or manual input of specific videos.
-- Ingestion also includes categorization of videos into genres
-  - This uses the publicly available AI-models of Google. This can be configured ([Configuration](#Configuration)).
-
+- Ingestion also includes categorization of videos into genres. This uses the publicly available AI-models of Google. This can be configured ([Configuration](#Configuration))
+  
 - Rate and filter the catalog in a browser (play mode for discovery, playback and export, rate mode for unrated items)
 - Import methods can be found in admin section
 - Export the desired selection (by filter) to YouTube-Playlist
@@ -38,7 +37,7 @@ Goal: Create your own MTV! 🎶
 - `requirements.txt` — Python dependencies.
 - `prism-ss-*.png` — UI screenshots.
 
-not needed except if you are really curious:
+Not needed except if you are really curious:
 
 * `ingestion.py` — Shared ingestion helpers (Firestore init, YouTube auth, Gemini predictions, audio handling).
 
@@ -92,13 +91,17 @@ This component of the Google Cloud suite is needed only if you want to run this 
 
 ##### Gemini API
 
-The API for the AI functions from Google is available in the Cloud Console as well. But the cheaper option is to create an API-key at [Google AI Studio](https://aistudio.google.com/) and use that. If you do it this way, you will get a certain quota of free API calls, only after depleting the free quota you will start paying for API calls. Costs for this API will only occur during ingesting (inserting) of new musicvideos into the collection). During rating/playing phase, no AI API calls will be made. When ingesting new videos, costs are depending on what model you choose. Right now I recommend gemini-3-flash-preview (default setting), which is fast and quite cheap. However if you ingest hundreds of even more videos into the database, in will cost several EUR/USD.
+The API for the AI functions from Google is available in the Cloud Console as well. In this case, it's called "Vertex". But the cheaper option is to create an API-key at [Google AI Studio](https://aistudio.google.com/) and use that. If you do it this way, you will get a certain quota of free API calls, only after depleting the free quota you will start paying for API calls. Costs for this API will only occur during ingesting (inserting) of new musicvideos into the collection). During rating/playing phase, no AI API calls will be made. When ingesting new videos, costs are depending on what model you choose. Right now I recommend gemini-3-flash-preview (default setting), which is fast and quite cheap. However if you ingest hundreds of even more videos into the database, in will cost several EUR/USD.
 
 It is highly recommended to set up a budget within Google Cloud Console to limit the maximum amount of costs.
 
+##### Secret Manager
+
+The Secret Manager is used to store certain aspects of the app which shouldn't be hardcoded into the application (like username/passwords, API-keys etc). It is needed onyl if you're running the app in the cloud completely, otherwise .env is also fine. It's free to use.
+
 ### Authenticate
 
-- Google Cloud (Firestore/Vertex): `gcloud auth application-default login`
+- Google Cloud (for Firestore/Vertex): `gcloud auth application-default login`
 - YouTube Data API: first run of the playlist or scrape scripts opens a browser OAuth flow; `token.pickle` will be written next to the scripts.
 - Set your project ID for the UI (and for scraping if you want to override ADC):
   ```bash
