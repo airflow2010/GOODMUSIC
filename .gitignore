@@ -13,12 +13,8 @@ client_secret.json
 token.pickle
 .env
 
-# Local runtime state
-progress.json
-
 # Virtual Environment
 venv
 
 # Private documentation
 README-private.md
-update-google-cloud-run.sh
