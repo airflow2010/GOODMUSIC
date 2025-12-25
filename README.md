@@ -17,7 +17,6 @@ Goal: Create your own MTV! 🎶
     <td valign="top"><img src="prism-ss-admin.png" alt="admin section"></td>
   </tr>
 </table>
-[TOC]
 
 ## Concept
 
