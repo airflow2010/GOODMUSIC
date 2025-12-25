@@ -40,7 +40,7 @@ def check_prerequisites():
             print("   You appear to be running on Google Cloud Run.")
             print("   Ensure you have mounted the Google Cloud Secrets as environment variables.")
             print("   Verify your 'gcloud run deploy' command includes:")
-            print('   --set-secrets="AUTH_USERNAME=prism-auth-username:latest,AUTH_PASSWORD=prism-auth-password:latest,PROJECT_ID=prism-auth-projectid:latest"')
+            print('   --set-secrets="AUTH_USERNAME=AUTH_USERNAME:latest,AUTH_PASSWORD=AUTH_PASSWORD:latest,PROJECT_ID=PROJECT_ID:latest"')
         else:
             print("   You appear to be running locally.")
             print("   Ensure you have a .env file or exported environment variables.")
