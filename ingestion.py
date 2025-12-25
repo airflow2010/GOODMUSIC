@@ -87,7 +87,7 @@ def init_firestore_db(project_id: Optional[str] = None) -> Optional[firestore.Cl
         creds, calculated_project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         
         # Determine final project ID: Argument > Env Var > ADC Default
-        final_project_id = project_id or os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT") or calculated_project_id
+        final_project_id = project_id or os.environ.get("PROJECT_ID") or calculated_project_id
         
         if not final_project_id:
             print("⚠️  Error: Could not determine Google Cloud Project ID.")
@@ -115,7 +115,7 @@ def parse_datetime(value: str | None) -> datetime | None:
 def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str = CLIENT_SECRETS_FILE):
     """Gets an authenticated YouTube service using the local token file."""
     creds = None
-    project_id = os.environ.get("PROJECT_ID") or os.environ.get("GCP_PROJECT")
+    project_id = os.environ.get("PROJECT_ID")
     secret_name = "YOUTUBE_TOKEN_PICKLE"
     
     # 1. Try to load from local file

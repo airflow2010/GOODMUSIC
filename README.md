@@ -73,7 +73,7 @@ Due to the nature of this project multiple different methods of authentication a
 
 | name                 | note                                                         | local-run    | cloud-run      |
 | -------------------- | ------------------------------------------------------------ | ------------ | -------------- |
-| GCP_PROJECT          | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
+| PROJECT_ID           | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
 | AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
 | `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | ?              |
@@ -117,21 +117,21 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    ```bash
    gcloud secrets create YOUTUBE_TOKEN_PICKLE --replication-policy="automatic"
    printf "your-api-key" | gcloud secrets create GEMINI_API_KEY --data-file=-
-   printf "your-username" | gcloud secrets create prism-auth-username --data-file=-
-   printf "your-password" | gcloud secrets create prism-auth-password --data-file=-
-   printf "your-project-id" | gcloud secrets create prism-auth-projectid --data-file=-
+   printf "your-username" | gcloud secrets create AUTH_USERNAME --data-file=-
+   printf "your-password" | gcloud secrets create AUTH_PASSWORD --data-file=-
+   printf "your-project-id" | gcloud secrets create PROJECT_ID --data-file=-
    ```
 
 3. Grant the Compute Engine default service account access to the secrets (replace `<PROJECT_NUMBER>` with your project number):
 
    ```bash
-   gcloud secrets add-iam-policy-binding prism-auth-username \
+   gcloud secrets add-iam-policy-binding AUTH_USERNAME \
        --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
        --role="roles/secretmanager.secretAccessor"
-   gcloud secrets add-iam-policy-binding prism-auth-password \
+   gcloud secrets add-iam-policy-binding AUTH_PASSWORD \
        --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
        --role="roles/secretmanager.secretAccessor"
-   gcloud secrets add-iam-policy-binding prism-auth-projectid \
+   gcloud secrets add-iam-policy-binding PROJECT_ID \
        --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
        --role="roles/secretmanager.secretAccessor"
    ```
@@ -162,12 +162,6 @@ Each document key is the YouTube `video_id` and stores fields like:
 We pull metadata from the YouTube API, which is why you have to enable it as well (search for it in [Google Cloud Console](https://console.cloud.google.com/) and enable it).
 
 Usage of this API is free, but note that you might run into quota limits of the API. This is especially true for playlist export, which consumes a lot of quota. In this case, you have to run the export several times over the course of several days. The application will continue export of playlists where it left.
-
-You must create credentials for this API:
-1. Go to **APIs & Services > Credentials**.
-2. Click **Create Credentials > OAuth client ID**.
-3. Select **Desktop app**.
-4. Download the JSON file, rename it to `client_secret.json`, and place it in the project root.
 
 #### Google Cloud Run
 
@@ -253,7 +247,7 @@ python scrape_to_firestore.py
   --limit-new-db-entries: Limits the number of new videos added to Firestore in this run. Defaults to 0 (no limit). Useful to control costs or batch updates.
 ```
 Notes:
-- Uses ADC (`gcloud auth application-default login`) and `GCP_PROJECT`/`--project`.
+- Uses ADC (`gcloud auth application-default login`) and `PROJECT_ID`/`--project`.
 - Needs `client_secret.json` for YouTube metadata; falls back gracefully if missing.
 
 ### 2) Flask UI
