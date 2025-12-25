@@ -97,7 +97,7 @@ Firestore database is somewhat limited in queries which it can directly fulfill.
 
 1. Start the GUI locally and switch to "play" mode. When you press "Apply" there at the filter section, a query will be sent to the db. If it requires an query index which isn't there, it will throw an error-message in the logs.
    The app detects these specific log-messages and display them right in the GUI where you can spot them immediately.
-2. So have a look at the logs and do some queries - check/uncheck the "exclude_rejected" and the "favorite_only" checkbox individually, and you'll see two or three such error messages.
+2. So do some queries - check/uncheck the "exclude_rejected" and the "favorite_only" checkbox individually, also be sure to check a specific genre once, and you'll see two or three such error messages.
 3. Click on the link in the error-message and you'll be automatically forwarded to the Cloud Console where you'll be prompted to acknowledge the new search index (just click on "create").
 
 #### preparation for local-run installations
