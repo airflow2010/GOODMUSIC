@@ -173,6 +173,10 @@ button, .button-link {
     color: #bbb;
 }
 
+.is-hidden {
+    display: none;
+}
+
 /* Sliders */
 .slider-container {
     display: flex;

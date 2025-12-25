@@ -111,7 +111,10 @@
         {% endif %}
 
         <!-- YouTube Player -->
-        <div id="player-error" style="display: none; color: red; margin-bottom: 15px;"></div>
+        <div id="player-error" class="index-error is-hidden">
+            <div><strong id="player-error-summary">YouTube player error</strong></div>
+            <div class="index-error__raw" id="player-error-raw"></div>
+        </div>
         <div class="video-container">
             <div id="player"></div>
         </div>
@@ -233,8 +236,15 @@
 
         console.error('YouTube Player Error', { code: code, videoId: videoId, message: errorMessage, rawEvent: event });
         if (playerErrorEl) {
-            playerErrorEl.style.display = 'block';
-            playerErrorEl.textContent = `YouTube Player Error (Code: ${code}): ${errorMessage} (Video ID: ${videoId})`;
+            playerErrorEl.classList.remove('is-hidden');
+            const summaryEl = document.getElementById('player-error-summary');
+            const rawEl = document.getElementById('player-error-raw');
+            if (summaryEl) {
+                summaryEl.textContent = 'YouTube player error';
+            }
+            if (rawEl) {
+                rawEl.textContent = `Code: ${code} | ${errorMessage} | Video ID: ${videoId}`;
+            }
         }
     }
 
