@@ -67,8 +67,6 @@ pip install -r requirements.txt
 
 #### Overview
 
-Tocheck: Google Cloud (for Firestore/Vertex): `gcloud auth application-default login` - why? Is setting the project-id really also needed?
-
 Due to the nature of this project multiple different methods of authentication are needed. Here is a brief overview - more detailled explanation about each component are found in this document.
 
 | name                 | note                                                         | local-run    | cloud-run      |
@@ -76,7 +74,7 @@ Due to the nature of this project multiple different methods of authentication a
 | PROJECT_ID           | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
 | AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
-| `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | ?              |
+| `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | N/A            |
 | `token.pickle`       | file which contains user credentials (access token and refresh token) which are used against the YouTube API | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
 
@@ -94,6 +92,7 @@ Regarding token.pickle, this files contains our credentials to authenticate our 
 1. In the running app, import new videos in the "admin"-section.
 2. A browser windows will pop up and ask for confirmation of access to your YouTube account.
 3. Acknowledge and `token.pickle` will be created.
+4. The token.pickle will then be automatically uploaded into the cloud into the Secret Manager, so next time you'll run the application from cloud it will be available there and you can use all functions that need YouTube API access (ingestion, playlist import/export) there
 
 #### preparation for local-run installations
 
@@ -105,6 +104,14 @@ AUTH_PASSWORD="<password>"
 PROJECT_ID="<project-id>"
 GEMINI_API_KEY="<api-key>"
 ```
+
+Also, for creating local Application Default Credentials (ADC), it is needed that you run this command once:
+
+```bash
+gcloud auth application-default login
+```
+
+This is needed for connecting to Firestore from your local computer.
 
 #### preparation for cloud-run installations
 
@@ -122,19 +129,21 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    printf "your-project-id" | gcloud secrets create PROJECT_ID --data-file=-
    ```
 
-3. Grant the Compute Engine default service account access to the secrets (replace `<PROJECT_NUMBER>` with your project number):
+3. Grant the Compute Engine default service account access to the secrets (replace `<PROJECT_ID>` with your project number and <SERVICE_ACCOUNT_EMAIL> with the service account email):
 
    ```bash
-   gcloud secrets add-iam-policy-binding AUTH_USERNAME \
-       --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
-       --role="roles/secretmanager.secretAccessor"
-   gcloud secrets add-iam-policy-binding AUTH_PASSWORD \
-       --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
-       --role="roles/secretmanager.secretAccessor"
-   gcloud secrets add-iam-policy-binding PROJECT_ID \
-       --member="serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com" \
-       --role="roles/secretmanager.secretAccessor"
+   # Project-wide read access to all secrets
+   gcloud projects add-iam-policy-binding <PROJECT_ID> \
+     --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" \
+     --role="roles/secretmanager.secretAccessor"
+   
+   # Write access only for YOUTUBE_TOKEN_PICKLE
+   gcloud secrets add-iam-policy-binding YOUTUBE_TOKEN_PICKLE \
+     --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" \
+     --role="roles/secretmanager.secretVersionAdder"
    ```
+   
+   If you prefer, you edit those changes also in the [Google Cloud Console](https://console.cloud.google.com/) under IAM & admin/IAM/Grant access.
 
 ### Google Cloud Services
 
@@ -271,7 +280,7 @@ gcloud run deploy prism-gui \
   --platform managed \
   --region europe-west4 \
   --allow-unauthenticated \
-  --set-secrets="AUTH_USERNAME=prism-auth-username:latest,AUTH_PASSWORD=prism-auth-password:latest,PROJECT_ID=prism-auth-projectid:latest"
+  --set-secrets="AUTH_USERNAME=AUTH_USERNAME:latest,AUTH_PASSWORD=AUTH_PASSWORD:latest,PROJECT_ID=PROJECT_ID:latest"
 ```
 
 You will get a dynamic URL which you can then use to access the app. You can map a custom domain to the app (in GCC/Cloud Run/Domain Mappings).
