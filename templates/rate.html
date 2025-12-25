@@ -20,6 +20,15 @@
             <option value="{{ url_for('admin_mode') }}">admin</option>
         </select>
     </div>
+    {% if index_error %}
+        <div class="index-error">
+            <div><strong>{{ index_error.summary }}</strong></div>
+            {% if index_error.link %}
+                <div><a href="{{ index_error.link }}" target="_blank" rel="noopener">Create/view index in console</a></div>
+            {% endif %}
+            <div class="index-error__raw">{{ index_error.raw }}</div>
+        </div>
+    {% endif %}
     {% if video %}
         <h2>{{ video.artist }} - {{ video.track }}</h2>
 

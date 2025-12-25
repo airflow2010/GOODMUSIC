@@ -93,6 +93,13 @@ Regarding token.pickle, this files contains our credentials to authenticate our 
 3. Acknowledge and `token.pickle` will be created.
 4. The token.pickle will then be automatically uploaded into the cloud into the Secret Manager, so next time you'll run the application from cloud it will be available there and you can use all functions that need YouTube API access (ingestion, playlist import/export) there
 
+Firestore database is somewhat limited in queries which it can directly fulfill. For cases where we need more complex queries, it is needed to (auto) populate an index query. This only has to be done once.
+
+1. Start the GUI locally and switch to "play" mode. When you press "Apply" there at the filter section, a query will be sent to the db. If it requires an query index which isn't there, it will throw an error-message in the logs.
+   The app detects these specific log-messages and display them right in the GUI where you can spot them immediately.
+2. So have a look at the logs and do some queries - check/uncheck the "exclude_rejected" and the "favorite_only" checkbox individually, and you'll see two or three such error messages.
+3. Click on the link in the error-message and you'll be automatically forwarded to the Cloud Console where you'll be prompted to acknowledge the new search index (just click on "create").
+
 #### preparation for local-run installations
 
 The easiest way to get going is just to create an .env file in the project root folder and fill it with the following environment variables:

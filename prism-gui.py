@@ -10,6 +10,7 @@ from flask import Flask, render_template, request, redirect, url_for, Response, 
 from google.cloud import firestore
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
+import re
 from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, init_firestore_db, AI_MODEL_NAME
 
 load_dotenv()
@@ -148,6 +149,19 @@ def requires_auth(f):
     return decorated
 
 # --- Helper Functions ---
+def extract_index_error_info(error: Exception):
+    """Return dict with info when Firestore reports a missing composite index."""
+    message = str(error)
+    if "requires an index" not in message:
+        return None
+    link_match = re.search(r"https://console\.firebase\.google\.com/\S+", message)
+    link = link_match.group(0) if link_match else None
+    if "currently building" in message:
+        summary = "Firestore index is still building; try again in a few minutes."
+    else:
+        summary = "Firestore query requires a composite index."
+    return {"summary": summary, "link": link, "raw": message}
+
 def get_filtered_videos_list(db, filters):
     """Reusable function to query and filter videos based on criteria."""
     try:
@@ -178,10 +192,10 @@ def get_filtered_videos_list(db, filters):
             candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
 
         candidate_videos.sort(key=lambda x: (str(x.get('artist') or '').lower(), str(x.get('track') or '').lower()))
-        return candidate_videos
+        return candidate_videos, None
     except Exception as e:
         print(f"An error occurred while fetching/filtering videos: {e}")
-        return []
+        return [], extract_index_error_info(e)
 
 
 def normalize_playlist_id(raw: str) -> str:
@@ -237,6 +251,8 @@ def rating_mode():
     if not db:
         return "Error: Firestore client not initialized.", 500
 
+    index_error = None
+
     # Fetch all unique genres for the dropdown
     try:
         # Use .get() to fetch all documents at once. This can be more reliable
@@ -256,9 +272,13 @@ def rating_mode():
         sorted_genres = []
 
     # Query for unrated videos (where date_rated is None)
-    query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("date_rated", "==", None)).limit(20).stream()
-    
-    unrated_videos = [doc.to_dict() for doc in query]
+    try:
+        query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("date_rated", "==", None)).limit(20).stream()
+        unrated_videos = [doc.to_dict() for doc in query]
+    except Exception as e:
+        print(f"An error occurred while fetching unrated videos: {e}")
+        index_error = extract_index_error_info(e)
+        unrated_videos = []
 
     # --- Get total count of unrated videos ---
     videos_left = 0
@@ -270,15 +290,17 @@ def rating_mode():
         videos_left = sum(1 for _ in docs)
     except Exception as e:
         print(f"Error counting videos for 'rate' page: {e}")
+        if not index_error:
+            index_error = extract_index_error_info(e)
         videos_left = "N/A" # Display an error indicator
 
     if not unrated_videos:
-        return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=0)
+        return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=0, index_error=index_error)
 
     # Select a random video from the fetched list
     video = random.choice(unrated_videos)
 
-    return render_template('rate.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=videos_left)
+    return render_template('rate.html', video=video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=videos_left, index_error=index_error)
 
 
 @app.route('/play', methods=['GET', 'POST'])
@@ -316,7 +338,7 @@ def playing_mode():
         'exclude_rejected': exclude_rejected,
     }
 
-    filtered_videos = get_filtered_videos_list(db, current_filters)
+    filtered_videos, index_error = get_filtered_videos_list(db, current_filters)
 
     videos_count = len(filtered_videos)
 
@@ -343,7 +365,7 @@ def playing_mode():
 
     export_message = request.args.get('export_message')
 
-    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count, playlist=filtered_videos, export_message=export_message)
+    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count, playlist=filtered_videos, export_message=export_message, index_error=index_error)
 
 @app.route("/admin")
 @requires_auth
@@ -534,7 +556,9 @@ def export_playlist():
         'exclude_rejected': 'exclude_rejected' in request.form,
     }
     
-    videos = get_filtered_videos_list(db, filters)
+    videos, index_error = get_filtered_videos_list(db, filters)
+    if index_error:
+        return redirect(url_for('playing_mode', export_message="Error: Firestore index missing or building. Please open the page to see details.", **filters))
     yt = ingestion_get_youtube_service()
     if not yt:
         return redirect(url_for('playing_mode', export_message="Error: YouTube API not connected.", **filters))
