@@ -21,11 +21,14 @@ Goal: Create your own MTV! 🎶
 ## Concept
 
 - Ingest musicvideo: extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection). The source of the videos can be Substacks (this is how this project originated), YouTube playlists, or manual input of specific videos.
-- Ingestion also includes categorization of videos into genres. This uses the publicly available AI-models of Google and can be configured ([Configuration](#configuration))
-  
-- Rate and filter the catalog in a browser (play mode for discovery, playback and export, rate mode for unrated items)
-- Import methods can be found in admin section
-- Export the desired selection (by filter) to YouTube-Playlist
+  - Ingestion also includes categorization of videos into genres. This uses the publicly available AI-models of Google and can be configured ([Configuration](#configuration))
+
+  - Import methods can be found in admin section
+
+- rate-mode presents unrated items (user watches new videos & rates/categorizes)
+- play-mode for filter selection & playback
+  - Also if needed: Export the desired selection to YouTube-Playlist
+
 
 ## Repository layout
 
