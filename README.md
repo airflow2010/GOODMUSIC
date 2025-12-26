@@ -192,11 +192,6 @@ It is highly recommended to set up a budget within Google Cloud Console to limit
 
 The Secret Manager is used to store certain aspects of the app which shouldn't be hardcoded into the application (like username/passwords, API-keys etc). It is needed onyl if you're running the app in the cloud completely, otherwise .env is also fine. It's free to use.
 
-### Required files
-
-- `client_secret.json` — OAuth client for YouTube Data API v3 (Desktop app).
-- `progress.json` — Created automatically to avoid duplicate playlist creation.
-
 ## Configuration
 
 ### ingestion.py
