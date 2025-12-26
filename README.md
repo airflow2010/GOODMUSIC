@@ -21,7 +21,7 @@ Goal: Create your own MTV! 🎶
 ## Concept
 
 - Ingest musicvideo: extract YouTube IDs, fetch metadata, and store them as documents in Firestore (`musicvideos` collection). The source of the videos can be Substacks (this is how this project originated), YouTube playlists, or manual input of specific videos.
-- Ingestion also includes categorization of videos into genres. This uses the publicly available AI-models of Google and can be configured ([Configuration](#Configuration))
+- Ingestion also includes categorization of videos into genres. This uses the publicly available AI-models of Google and can be configured ([Configuration](#configuration))
   
 - Rate and filter the catalog in a browser (play mode for discovery, playback and export, rate mode for unrated items)
 - Import methods can be found in admin section
@@ -123,7 +123,7 @@ This is needed for connecting to Firestore from your local computer.
 
 To secure the Flask UI in Cloud Run without exposing credentials in deployment commands:
 
-1. Enable [Secret Manager](#Secret Manager): `gcloud services enable secretmanager.googleapis.com`
+1. Enable [Secret Manager](#secret-manager): `gcloud services enable secretmanager.googleapis.com`
 
 2. Create secrets we need for our app:
 
