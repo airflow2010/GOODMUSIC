@@ -76,7 +76,7 @@ Due to the nature of this project multiple different methods of authentication a
 | PROJECT_ID           | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
 | AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
-| AUTH_GOOGLE=         | env-var with email of authorized user                        | .env         | Secret Manager |
+| AUTH_GOOGLE          | env-var with email of authorized user                        | .env         | Secret Manager |
 | `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | Secret Manager |
 | `token.pickle`       | file which contains user credentials (access token and refresh token) which are used against the YouTube API | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
