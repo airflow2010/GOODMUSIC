@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import subprocess
 import random
@@ -6,12 +7,14 @@ from functools import wraps
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context
+from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context, session
+from werkzeug.middleware.proxy_fix import ProxyFix
+from authlib.integrations.flask_client import OAuth
 from google.cloud import firestore
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
 import re
-from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, init_firestore_db, AI_MODEL_NAME
+from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, init_firestore_db, AI_MODEL_NAME, get_gcp_secret
 
 load_dotenv()
 
@@ -20,6 +23,52 @@ COLLECTION_NAME = "musicvideos"
 # --- Authentication Configuration ---
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD")
+AUTH_GOOGLE = os.environ.get("AUTH_GOOGLE")
+FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "prism_secret_key")
+
+# --- Google OAuth Configuration (will be set later by reading client_secret.json)---
+GOOGLE_CLIENT_ID = None
+GOOGLE_CLIENT_SECRET = None
+
+# Determine absolute path to client_secret.json to ensure it's found regardless of CWD
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CLIENT_SECRET_FILE = os.path.join(BASE_DIR, "client_secret.json")
+
+# --- Firestore Client Initialization ---
+# Initialize DB early to get Project ID for Secret Manager access
+db = init_firestore_db()
+
+if db:
+    print(f"✅ Configuration loaded for Project ID: {db.project}")
+else:
+    # We don't exit here yet; we'll catch critical DB failures at the end of startup
+    pass
+
+# Load Google Credentials from client_secret.json or Secret Manager
+if os.path.exists(CLIENT_SECRET_FILE):
+    try:
+        with open(CLIENT_SECRET_FILE, "r") as f:
+            client_data = json.load(f)
+            # Look for 'web' (preferred) or 'installed'
+            creds = client_data.get("web") or client_data.get("installed")
+            if creds:
+                GOOGLE_CLIENT_ID = creds.get("client_id")
+                GOOGLE_CLIENT_SECRET = creds.get("client_secret")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not parse client_secret.json: {e}")
+elif db and db.project:
+    # Try fetching from Secret Manager if file is missing
+    print(f"ℹ️  client_secret.json not found. Attempting to fetch secret 'CLIENT_SECRET_JSON'...")
+    secret_content = get_gcp_secret("CLIENT_SECRET_JSON", db.project)
+    if secret_content:
+        try:
+            client_data = json.loads(secret_content)
+            creds = client_data.get("web") or client_data.get("installed")
+            if creds:
+                GOOGLE_CLIENT_ID = creds.get("client_id")
+                GOOGLE_CLIENT_SECRET = creds.get("client_secret")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not parse secret 'CLIENT_SECRET_JSON': {e}")
 
 def check_prerequisites():
     """Checks for prerequisites for successful deployment and refuses to start if not met."""
@@ -46,6 +95,16 @@ def check_prerequisites():
             print("   You appear to be running locally.")
             print("   Ensure you have a .env file or exported environment variables.")
         sys.exit(1)
+
+    if AUTH_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
+        print("\n⚠️  WARNING: AUTH_GOOGLE is set, but client_secret.json is missing or invalid.")
+        print(f"   Expected file at: {CLIENT_SECRET_FILE}")
+        print("   Google Authentication will be disabled, falling back to Basic Auth only.")
+        print("   Ensure you have a valid client_secret.json file or 'CLIENT_SECRET_JSON' in Secret Manager.")
+    elif AUTH_GOOGLE:
+        print(f"✅ Google Authentication enabled for user: {AUTH_GOOGLE}")
+    else:
+        print("ℹ️  Google Authentication disabled (AUTH_GOOGLE not set).")
 
     # Check for required templates
     required_templates = ['rate.html', 'play.html', 'admin.html']
@@ -108,24 +167,29 @@ VIDEO_RATINGS = {
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
+app.secret_key = FLASK_SECRET_KEY
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-# --- Firestore Client Initialization ---
-db = init_firestore_db() # Let the function find the Project ID automatically
+# --- OAuth Initialization ---
+oauth = OAuth(app)
+google = None
+if AUTH_GOOGLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    google = oauth.register(
+        name='google',
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={'scope': 'openid email'}
+    )
 
-if not db:
+# Verify collection access
+if db:
+    check_firestore_access(db)
+else:
     print("\n" + "!" * 60)
     print("❌ STARTUP ERROR: Could not connect to Firestore.")
     print("!" * 60)
-    print("\nINSTRUCTIONS:")
-    print("   1. Check if the Google Cloud Project ID is correct.")
-    print("   2. Ensure the Service Account has 'Cloud Datastore User' or 'Firestore User' role.")
-    print("   3. If running locally, check your 'gcloud auth application-default login' credentials.")
     sys.exit(1)
-
-print(f"✅ Configuration loaded for Project ID: {db.project}")
-
-# Verify collection access
-check_firestore_access(db)
 
 # --- Auth Decorator ---
 def check_auth(username, password):
@@ -142,10 +206,26 @@ def authenticate():
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # 1. Check active Google Session
+        if AUTH_GOOGLE and session.get('user') == AUTH_GOOGLE:
+            return f(*args, **kwargs)
+
+        # 2. Check Basic Auth (Allow even if Google is enabled)
         auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return authenticate()
-        return f(*args, **kwargs)
+        if auth and check_auth(auth.username, auth.password):
+            return f(*args, **kwargs)
+
+        # 3. Google Auth (Exclusive if enabled)
+        if AUTH_GOOGLE:
+            if not google:
+                return Response("Configuration Error: AUTH_GOOGLE is set but Google Client is not initialized. Check server logs for missing client_secret.json.", 500)
+            
+            if session.get('google_attempted'):
+                return Response(f"Access Denied: You are not logged in as {AUTH_GOOGLE}. <br><a href='{url_for('login_google')}'>Try again</a>", 403)
+            
+            return redirect(url_for('login_google'))
+
+        return authenticate()
     return decorated
 
 # --- Helper Functions ---
@@ -233,13 +313,73 @@ def normalize_video_id(raw: str) -> str:
             pass
     return value
 
+# --- Auth Routes ---
+@app.route('/login/google')
+def login_google():
+    if not google:
+        print("⚠️  Google Login requested but 'google' client is not initialized.")
+        return redirect(url_for('index'))
+    
+    # Clear any existing session flags to ensure a fresh attempt
+    session.pop('google_attempted', None)
+    
+    # Mark that we have attempted Google Auth to prevent infinite redirect loops
+    # if the user fails auth and falls back to Basic Auth.
+    session['google_attempted'] = True
+    redirect_uri = url_for('auth_google_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route('/google/callback')
+def auth_google_callback():
+    if not google:
+        return redirect(url_for('index'))
+    try:
+        token = google.authorize_access_token()
+        user_info = token.get('userinfo')
+        if user_info and user_info.get('email') == AUTH_GOOGLE:
+            session['user'] = user_info['email']
+            # Clear the attempted flag on success
+            session.pop('google_attempted', None)
+    except Exception as e:
+        print(f"Google Auth Error: {e}")
+    
+    # Redirect to index. If auth failed, requires_auth will trigger Basic Auth.
+    return redirect(url_for('index'))
+
+@app.route('/login/legacy')
+def login_legacy():
+    auth = request.authorization
+    if auth and check_auth(auth.username, auth.password):
+        return redirect(url_for('rating_mode'))
+    return authenticate()
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
+
 @app.route("/")
-@requires_auth
 def index():
     """
-    Redirects the root URL to the rating page.
+    Landing page. Redirects to app if logged in, else shows login page.
     """
-    return redirect(url_for('rating_mode'))
+    # Check if authenticated
+    is_logged_in = False
+    
+    # Google Check
+    if AUTH_GOOGLE and session.get('user') == AUTH_GOOGLE:
+        is_logged_in = True
+    
+    # Basic Auth Check
+    if not is_logged_in:
+        auth = request.authorization
+        if auth and check_auth(auth.username, auth.password):
+            is_logged_in = True
+    
+    if is_logged_in:
+        return redirect(url_for('rating_mode'))
+        
+    return render_template('login.html', google_enabled=bool(AUTH_GOOGLE))
 
 
 @app.route("/rate", methods=['GET'])
@@ -430,7 +570,10 @@ def admin_mode():
         has_cookies = os.path.exists("cookies.txt")
         import_restricted = is_cloud and not has_cookies
 
-        return render_template('admin.html', stats=stats, import_restricted=import_restricted)
+        # Determine Authentication Status
+        auth_status = session.get('user') if session.get('user') else "legacy authentication (username/password)"
+
+        return render_template('admin.html', stats=stats, import_restricted=import_restricted, auth_status=auth_status)
 
     except Exception as e:
         return f"An error occurred: {e}", 500

@@ -142,18 +142,34 @@ def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str =
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-                # Save happens below
-            except Exception:
-                return None
-        else:
+            except Exception as e:
+                print(f"⚠️  Token refresh failed: {e}. Initiating new login...")
+                creds = None
+
+        if not creds:
             if not os.path.exists(client_secrets_file):
-                return None
+                # Try fetching from Secret Manager
+                print(f"ℹ️  '{client_secrets_file}' not found. Checking Secret Manager for 'CLIENT_SECRET_JSON'...")
+                secret_content = get_gcp_secret("CLIENT_SECRET_JSON", project_id) if project_id else None
+                
+                if secret_content:
+                    # Write to temp file because InstalledAppFlow expects a file
+                    with open(client_secrets_file, "w") as f:
+                        f.write(secret_content)
+                else:
+                    print(f"⚠️  Client secrets file '{client_secrets_file}' not found and secret 'CLIENT_SECRET_JSON' could not be retrieved.")
+                    return None
             from google_auth_oauthlib.flow import InstalledAppFlow
 
             try:
                 flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, YOUTUBE_SCOPES)
-                creds = flow.run_local_server(port=0)
-            except Exception:
+                # For 'Web' client IDs, we must use a fixed port that matches the 
+                # "Authorized redirect URIs" in the Google Cloud Console.
+                # Ensure 'http://localhost:8080/' is added to your Console.
+                print("ℹ️  Launching auth server. Ensure 'http://localhost:8080/' is in your Authorized Redirect URIs.")
+                creds = flow.run_local_server(port=8080)
+            except Exception as e:
+                print(f"⚠️  Interactive login failed: {e}")
                 return None
         
         # 4. Save valid credentials (Local File + Secret Manager)
@@ -220,13 +236,6 @@ def select_best_audio_format(formats: list, max_size_mb: int = 25) -> Optional[s
     def get_filesize(f):
         # filesize_approx is often available when filesize is not
         return f.get("filesize") or f.get("filesize_approx")
-
-    # Debug: Print all available formats to understand what yt-dlp sees
-    print(f"   🔍 Inspecting {len(formats)} available formats:")
-    for f in formats:
-        f_size = get_filesize(f)
-        size_str = f"{round(f_size / (1024*1024), 2)}MB" if f_size else "Unknown size"
-        print(f"      - {f.get('format_id')}: {f.get('ext')} | {f.get('resolution')} | {size_str} | vcodec: {f.get('vcodec')} | acodec: {f.get('acodec')} | abr: {f.get('abr')}")
 
     # --- Pass 1: Find audio-only formats ---
     # More robust check: vcodec is 'none' or the key doesn't exist, but acodec must exist.

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>GOODMUSIC Login</title>
+    <style>
+        .login-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .app-desc {
+            font-size: 1.5em;
+            margin: 20px 0 40px;
+            color: #e0e0e0;
+        }
+        .login-options {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 100%;
+            max-width: 300px;
+        }
+        .login-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 1.1em;
+            font-weight: 500;
+            transition: opacity 0.2s;
+            border: none;
+            cursor: pointer;
+            color: white;
+        }
+        .login-btn:hover {
+            opacity: 0.9;
+            text-decoration: none;
+        }
+        .btn-google {
+            background-color: #4285F4;
+        }
+        .btn-legacy {
+            background-color: #555;
+        }
+        .repo-link {
+            margin-top: 60px;
+            color: #666;
+            font-size: 0.9em;
+        }
+        .repo-link:hover {
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="login-content">
+        <div class="logo-wrap" style="margin-bottom: 10px;">
+            <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+        </div>
+        
+        <div class="app-desc">Create your own MTV! 🎶</div>
+
+        <div class="login-options">
+            {% if google_enabled %}
+            <a href="{{ url_for('login_google') }}" class="login-btn btn-google">
+                Login with Google
+            </a>
+            {% endif %}
+            <a href="{{ url_for('login_legacy') }}" class="login-btn btn-legacy">
+                Legacy Login
+            </a>
+        </div>
+
+        <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank" class="repo-link">
+            https://github.com/airflow2010/GOODMUSIC
+        </a>
+    </div>
+</div>
+
+</body>
+</html>

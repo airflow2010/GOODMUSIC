@@ -76,7 +76,7 @@ Due to the nature of this project multiple different methods of authentication a
 | PROJECT_ID           | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
 | AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
-| `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | N/A            |
+| `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | Secret Manager |
 | `token.pickle`       | file which contains user credentials (access token and refresh token) which are used against the YouTube API | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
 
@@ -86,8 +86,15 @@ You must create credentials for our app to authenticate against the YouTube API:
 
 1. Go to **APIs & Services > Credentials**.
 2. Click **Create Credentials > OAuth client ID**.
-3. Select **Desktop app**.
-4. Download the JSON file, rename it to `client_secret.json`, and place it in the project root.
+3. Select **Web app**.
+4. Set **Authorised redirect URIs**
+   1. http://localhost:8080/
+      Needed when running scripts locally
+   2. http://localhost:8080/google/callback
+      Needed for OAuth Login for the web-app (running locally)
+   3. https://\<YOUR-CLOUD-RUN-URL>/google/callback
+      Needed for OAuth Login for the web-app (running in the cloud)
+5. Download the JSON file, rename it to `client_secret.json`, and place it in the project root.
 
 Regarding token.pickle, this files contains our credentials to authenticate our individual user (not the app) against the YouTube API. It will be created during the first call of functions which call this API - like scraping and importing new videos, or like exporting playlists to YouTube. In this case, a browser windows will pop up and you have to acknowledge access of our app to your YouTube-account.
 
@@ -138,7 +145,10 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    printf "your-project-id" | gcloud secrets create PROJECT_ID --data-file=-
    ```
 
-3. Grant the Compute Engine default service account access to the secrets (replace `<PROJECT_ID>` with your project number and <SERVICE_ACCOUNT_EMAIL> with the service account email):
+3. You also have to upload OAuth client file you created earlier to Secret Manager with this command:
+   `gcloud secrets create CLIENT_SECRET_JSON --data-file=client_secret.json`
+
+4. Grant the Compute Engine default service account access to the secrets (replace `<PROJECT_ID>` with your project number and <SERVICE_ACCOUNT_EMAIL> with the service account email):
 
    ```bash
    # Project-wide read access to all secrets
@@ -151,7 +161,7 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
      --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" \
      --role="roles/secretmanager.secretVersionAdder"
    ```
-   
+
    If you prefer, you edit those changes also in the [Google Cloud Console](https://console.cloud.google.com/) under IAM & admin/IAM/Grant access.
 
 ### Google Cloud Services

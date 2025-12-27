@@ -5,6 +5,7 @@ google-auth-oauthlib
 google-cloud-aiplatform
 google-cloud-firestore==2.13.1
 google-cloud-secret-manager
+google-genai
 
 # Web Scraping
 requests>=2.27
@@ -13,7 +14,9 @@ beautifulsoup4
 # Web Server (Flask App)
 Flask==3.0.0
 gunicorn==21.2.0
+Authlib
 
 # Utilities
 python-dotenv
 yt-dlp
+pydantic
