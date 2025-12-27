@@ -216,12 +216,12 @@ def requires_auth(f):
             return f(*args, **kwargs)
 
         # 3. Google Auth (Exclusive if enabled)
-        if AUTH_GOOGLE:
+        if AUTH_GOOGLE and not session.get('prefer_legacy'):
             if not google:
                 return Response("Configuration Error: AUTH_GOOGLE is set but Google Client is not initialized. Check server logs for missing client_secret.json.", 500)
             
             if session.get('google_attempted'):
-                return Response(f"Access Denied: You are not logged in as {AUTH_GOOGLE}. <br><a href='{url_for('login_google')}'>Try again</a>", 403)
+                return Response(f"Access Denied: Your user is not authorized.<br><a href='{url_for('login_google')}'>Try again</a><br>or <a href='{url_for('login_legacy')}'>Legacy Login</a>", 403)
             
             return redirect(url_for('login_google'))
 
@@ -320,14 +320,21 @@ def login_google():
         print("⚠️  Google Login requested but 'google' client is not initialized.")
         return redirect(url_for('index'))
     
+    # Check if we need to force account selection (if user is already logged in but unauthorized)
+    extra_params = {}
+    if session.get('user') and session.get('user') != AUTH_GOOGLE:
+        extra_params = {'prompt': 'select_account'}
+
     # Clear any existing session flags to ensure a fresh attempt
     session.pop('google_attempted', None)
+    session.pop('prefer_legacy', None)
+    session.pop('user', None)
     
     # Mark that we have attempted Google Auth to prevent infinite redirect loops
     # if the user fails auth and falls back to Basic Auth.
     session['google_attempted'] = True
     redirect_uri = url_for('auth_google_callback', _external=True)
-    return google.authorize_redirect(redirect_uri)
+    return google.authorize_redirect(redirect_uri, **extra_params)
 
 @app.route('/google/callback')
 def auth_google_callback():
@@ -336,8 +343,12 @@ def auth_google_callback():
     try:
         token = google.authorize_access_token()
         user_info = token.get('userinfo')
-        if user_info and user_info.get('email') == AUTH_GOOGLE:
+        
+        # Store email regardless of authorization status
+        if user_info and user_info.get('email'):
             session['user'] = user_info['email']
+
+        if user_info and user_info.get('email') == AUTH_GOOGLE:
             # Clear the attempted flag on success
             session.pop('google_attempted', None)
     except Exception as e:
@@ -348,6 +359,10 @@ def auth_google_callback():
 
 @app.route('/login/legacy')
 def login_legacy():
+    # Clear Google attempt flag to allow Basic Auth fallback on protected routes
+    session.pop('google_attempted', None)
+    session['prefer_legacy'] = True
+    session.pop('user', None)
     auth = request.authorization
     if auth and check_auth(auth.username, auth.password):
         return redirect(url_for('rating_mode'))
@@ -357,6 +372,10 @@ def login_legacy():
 def logout():
     session.clear()
     return redirect(url_for('index'))
+
+@app.route('/privacy')
+def privacy():
+    return render_template('privacy.html', current_date=datetime.now().strftime("%Y-%m-%d"))
 
 @app.route("/")
 def index():
@@ -378,8 +397,12 @@ def index():
     
     if is_logged_in:
         return redirect(url_for('rating_mode'))
+
+    unauthorized_email = None
+    if AUTH_GOOGLE and session.get('user') and session.get('user') != AUTH_GOOGLE:
+        unauthorized_email = session.get('user')
         
-    return render_template('login.html', google_enabled=bool(AUTH_GOOGLE))
+    return render_template('login.html', google_enabled=bool(AUTH_GOOGLE), unauthorized_email=unauthorized_email)
 
 
 @app.route("/rate", methods=['GET'])
@@ -571,7 +594,10 @@ def admin_mode():
         import_restricted = is_cloud and not has_cookies
 
         # Determine Authentication Status
-        auth_status = session.get('user') if session.get('user') else "legacy authentication (username/password)"
+        if AUTH_GOOGLE and session.get('user') == AUTH_GOOGLE:
+            auth_status = session.get('user')
+        else:
+            auth_status = "legacy authentication (username/password)"
 
         return render_template('admin.html', stats=stats, import_restricted=import_restricted, auth_status=auth_status)
 

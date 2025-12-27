@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Privacy Policy - PRISM</title>
+    <style>
+        .policy-content {
+            line-height: 1.6;
+            color: #ccc;
+        }
+        .policy-content h3 {
+            color: #fff;
+            margin-top: 25px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        .policy-content ul {
+            list-style-type: disc;
+            margin-left: 20px;
+        }
+        .policy-content li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="logo-wrap">
+        <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="PRISM Logo">
+    </div>
+
+    <h1>Privacy Policy</h1>
+    <p style="color: #888; font-size: 0.9em;">Last updated: {{ current_date }}</p>
+
+    <div class="policy-content">
+        <h3>1. Introduction</h3>
+        <p>PRISM ("we", "our", or "the App") is an open-source music video curation and rating tool. This Privacy Policy explains how we handle your data when you use our application, specifically regarding Google and YouTube services.</p>
+
+        <h3>2. Data We Collect</h3>
+        <p>When you sign in with Google, we collect the following information:</p>
+        <ul>
+            <li><strong>Google User Info:</strong> Your email address (to identify authorized users).</li>
+            <li><strong>YouTube Data:</strong> If you use the import/export features, we access your public playlists and channel information via the YouTube API Services.</li>
+        </ul>
+
+        <h3>3. How We Use Your Data</h3>
+        <ul>
+            <li><strong>Authentication:</strong> Your email address is used solely to verify your identity and grant access to the application's features.</li>
+            <li><strong>Playlist Management:</strong> We use YouTube API access to allow you to import videos into the PRISM database and export your rated videos back to your YouTube playlists.</li>
+        </ul>
+
+        <h3>4. Data Storage and Sharing</h3>
+        <p>Your data is stored securely in our database (Google Cloud Firestore). We <strong>do not</strong> sell, trade, or transfer your personally identifiable information to outside parties. Data is used strictly for the functionality of the application.</p>
+
+        <h3>5. Third-Party Services</h3>
+        <p>This app uses YouTube API Services. By using this app, you also agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a> and acknowledge the <a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a>.</p>
+
+        <h3>6. User Data Deletion</h3>
+        <p>You may revoke the App's access to your data at any time via the <a href="https://myaccount.google.com/permissions" target="_blank">Google Security Settings</a> page. To request deletion of your data stored within PRISM, please contact the repository maintainer.</p>
+
+        <h3>7. Contact</h3>
+        <p>If you have questions about this Privacy Policy, please contact the repository maintainer via <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank">GitHub</a>.</p>
+    </div>
+
+    <div style="margin-top: 40px; text-align: center;">
+        <a href="{{ url_for('index') }}" class="button-link next-button">Back to App</a>
+    </div>
+</div>
+
+</body>
+</html>
