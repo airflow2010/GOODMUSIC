@@ -20,12 +20,6 @@ load_dotenv()
 
 COLLECTION_NAME = "musicvideos"
 
-# --- Authentication Configuration ---
-AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
-AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD")
-AUTH_GOOGLE = os.environ.get("AUTH_GOOGLE")
-FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
-
 # --- Google OAuth Configuration (will be set later by reading client_secret.json)---
 GOOGLE_CLIENT_ID = None
 GOOGLE_CLIENT_SECRET = None
@@ -43,6 +37,19 @@ if db:
 else:
     # We don't exit here yet; we'll catch critical DB failures at the end of startup
     pass
+
+# --- Authentication Configuration ---
+def get_conf(key, project_id=None):
+    val = os.environ.get(key)
+    if not val and project_id:
+        print(f"   🔑 Env var '{key}' not found. Fetching from Secret Manager...")
+        val = get_gcp_secret(key, project_id)
+    return val
+
+AUTH_USERNAME = get_conf("AUTH_USERNAME", db.project if db else None)
+AUTH_PASSWORD = get_conf("AUTH_PASSWORD", db.project if db else None)
+AUTH_GOOGLE = get_conf("AUTH_GOOGLE", db.project if db else None)
+FLASK_SECRET_KEY = get_conf("FLASK_SECRET_KEY", db.project if db else None)
 
 # Load Google Credentials from client_secret.json or Secret Manager
 if os.path.exists(CLIENT_SECRET_FILE):
