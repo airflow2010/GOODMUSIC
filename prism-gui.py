@@ -24,7 +24,7 @@ COLLECTION_NAME = "musicvideos"
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD")
 AUTH_GOOGLE = os.environ.get("AUTH_GOOGLE")
-FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "prism_secret_key")
+FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
 
 # --- Google OAuth Configuration (will be set later by reading client_secret.json)---
 GOOGLE_CLIENT_ID = None
@@ -77,6 +77,8 @@ def check_prerequisites():
         missing_vars.append("AUTH_USERNAME")
     if not AUTH_PASSWORD:
         missing_vars.append("AUTH_PASSWORD")
+    if not FLASK_SECRET_KEY:
+        missing_vars.append("FLASK_SECRET_KEY")
 
     if missing_vars:
         print("\n" + "!" * 60)

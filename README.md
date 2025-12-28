@@ -65,11 +65,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Authentication
+### Mandatory Configuration
 
 #### Overview
 
-Due to the nature of this project multiple different methods of authentication are needed. Here is a brief overview - more detailled explanation about each component are found in this document.
+Due to the nature of this project several configuration steps are needed. Here is a brief overview - more detailled explanation about each component are found in this document.
 
 | name                 | note                                                         | local-run    | cloud-run      |
 | -------------------- | ------------------------------------------------------------ | ------------ | -------------- |
@@ -80,6 +80,7 @@ Due to the nature of this project multiple different methods of authentication a
 | `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | Secret Manager |
 | `token.pickle`       | file which contains user credentials (access token and refresh token) which are used against the YouTube API | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
+| FLASK_SECRET_KEY     | env-var with a random, stable value used to sign sessions    | .env         | Secret Manager |
 
 #### preparations for all installations
 
@@ -90,11 +91,11 @@ You must create credentials for our app to authenticate against the YouTube API:
 3. Select **Web app**.
 4. Set **Authorised redirect URIs**
    1. http://localhost:8080/
-      Needed when running scripts locally
+      // Needed when running scripts locally
    2. http://localhost:8080/google/callback
-      Needed for OAuth Login for the web-app (running locally)
+      // Needed for OAuth Login for the web-app (running locally)
    3. https://\<YOUR-CLOUD-RUN-URL>/google/callback
-      Needed for OAuth Login for the web-app (running in the cloud)
+      // Needed for OAuth Login for the web-app (running in the cloud)
 5. Download the JSON file, rename it to `client_secret.json`, and place it in the project root.
 
 Regarding token.pickle, this files contains our credentials to authenticate our individual user (not the app) against the YouTube API. It will be created during the first call of functions which call this API - like scraping and importing new videos, or like exporting playlists to YouTube. In this case, a browser windows will pop up and you have to acknowledge access of our app to your YouTube-account.
@@ -121,6 +122,7 @@ AUTH_PASSWORD="<password>"
 AUTH_GOOGLE="<email-of-authorized-user>"
 PROJECT_ID="<project-id>"
 GEMINI_API_KEY="<api-key>"
+FLASK_SECRET_KEY="<random-stable-secret>"
 ```
 
 Also, for creating local Application Default Credentials (ADC), it is needed that you run this command once:
@@ -146,6 +148,7 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    printf "your-password" | gcloud secrets create AUTH_PASSWORD --data-file=-
    printf "email-of-authorized-user" | gcloud secrets create AUTH_GOOGLE --data-file=-
    printf "your-project-id" | gcloud secrets create PROJECT_ID --data-file=-
+   printf "your-random-stable-secret" | gcloud secrets create FLASK_SECRET_KEY --data-file=-
    ```
 
 3. You also have to upload OAuth client file you created earlier to Secret Manager with this command:
@@ -208,7 +211,7 @@ It is highly recommended to set up a budget within Google Cloud Console to limit
 
 The Secret Manager is used to store certain aspects of the app which shouldn't be hardcoded into the application (like username/passwords, API-keys etc). It is needed onyl if you're running the app in the cloud completely, otherwise .env is also fine. It's free to use.
 
-## Configuration
+## Customization
 
 ### ingestion.py
 
