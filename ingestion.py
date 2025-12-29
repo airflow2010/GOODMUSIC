@@ -318,12 +318,15 @@ def _attempt_download(video_id: str, use_cookies: bool) -> Optional[str]:
     }
     if use_cookies and os.path.exists("cookies.txt"):
         info_opts["cookiefile"] = "cookies.txt"
+        print(f"     - ℹ️  Using cookies from {os.path.abspath('cookies.txt')}")
 
     info = None
     try:
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     except Exception as e:
+        if "Sign in to confirm your age" in str(e):
+            print("     - ⚠️  YouTube requires sign-in (Age-gated). Cookies might be invalid or account not verified.")
         print(f"     - ⚠️ Could not fetch video formats: {e}")
         return None
 
@@ -639,6 +642,7 @@ def ingest_video_batch(
     summary = {"added": 0, "exists": 0, "unavailable": 0, "errors": 0, "aborted": False}
     ids_list = list(video_ids)
     total = len(ids_list)
+    consecutive_audio_failures = 0
 
     def log(msg: str):
         if progress_logger:
@@ -663,6 +667,7 @@ def ingest_video_batch(
         if status == "added":
             summary["added"] += 1
             log(f"   ✅ Added {vid} ({result.get('title', '')})")
+            consecutive_audio_failures = 0
         elif status == "exists":
             summary["exists"] += 1
             log(f"   ↩️  Skipped existing {vid}")
@@ -675,9 +680,11 @@ def ingest_video_batch(
             log(f"   ❌ Error {vid}: {msg}")
 
             if "Audio download failed" in msg:
-                log("   🛑 Aborting batch: Audio download is failing (likely IP blocking). Retry if it was just a temporary problem.")
-                summary["aborted"] = True
-                break
+                consecutive_audio_failures += 1
+                if consecutive_audio_failures >= 3:
+                    log("   🛑 Aborting batch: 3 consecutive audio download failures (likely IP blocking or invalid cookies).")
+                    summary["aborted"] = True
+                    break
 
         if sleep_between:
             time.sleep(sleep_between)
