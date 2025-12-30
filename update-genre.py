@@ -103,10 +103,10 @@ def main():
         print(f"   - Fetching audio and calling AI for '{title}'...")
 
         # This function handles audio download, AI call, and cleanup
-        prediction = predict_genre(model, video_id, title, description)
+        prediction, error = predict_genre(model, video_id, title, description)
 
         if prediction is None:
-            print(f"   ❌ AI prediction failed for {video_id} (e.g., audio download failed). Skipping.")
+            print(f"   ❌ AI prediction failed for {video_id}: {error}. Skipping.")
             continue
 
         new_genre, new_fidelity, new_remark, new_artist, new_track = prediction

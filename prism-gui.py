@@ -1,14 +1,17 @@
 import os
 import json
+import base64
 import sys
 import subprocess
 import random
 from functools import wraps
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qs, urlparse
+from typing import Optional
 
-from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context, session
+from flask import Flask, render_template, request, redirect, url_for, Response, stream_with_context, session, g
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
 from authlib.integrations.flask_client import OAuth
 from google.cloud import firestore
 from dotenv import load_dotenv
@@ -19,6 +22,8 @@ from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion
 load_dotenv()
 
 COLLECTION_NAME = "musicvideos"
+USERS_COLLECTION = "users"
+IMPORT_REQUESTS_COLLECTION = "import_requests"
 
 # --- Google OAuth Configuration (will be set later by reading client_secret.json)---
 GOOGLE_CLIENT_ID = None
@@ -111,7 +116,7 @@ def check_prerequisites():
         print("   Google Authentication will be disabled, falling back to Basic Auth only.")
         print("   Ensure you have a valid client_secret.json file or 'CLIENT_SECRET_JSON' in Secret Manager.")
     elif AUTH_GOOGLE:
-        print(f"✅ Google Authentication enabled for user: {AUTH_GOOGLE}")
+        print(f"✅ Google Authentication enabled (admin): {AUTH_GOOGLE}")
     else:
         print("ℹ️  Google Authentication disabled (AUTH_GOOGLE not set).")
 
@@ -153,6 +158,152 @@ def check_firestore_access(db_client):
         print("   1. Ensure the Service Account has 'Cloud Datastore User' permissions.")
         print("   2. Verify the collection name is correct.")
         sys.exit(1)
+
+
+def rating_key_for_user_id(user_id: str) -> str:
+    token = base64.urlsafe_b64encode(user_id.encode("utf-8")).decode("ascii").rstrip("=")
+    return token or "user"
+
+
+def get_user_doc(user_id: str) -> Optional[dict]:
+    if not db:
+        return None
+    doc = db.collection(USERS_COLLECTION).document(user_id).get()
+    return doc.to_dict() if doc.exists else None
+
+
+def ensure_user_record(
+    user_id: str,
+    role: str,
+    auth_provider: str,
+    email: Optional[str] = None,
+    force_role: bool = False,
+    force_auth_provider: bool = False,
+) -> Optional[dict]:
+    if not db:
+        return None
+    doc_ref = db.collection(USERS_COLLECTION).document(user_id)
+    doc = doc_ref.get()
+    data = doc.to_dict() if doc.exists else {}
+    rating_key = data.get("rating_key") or rating_key_for_user_id(user_id)
+    role_value = role if force_role else (data.get("role") or role)
+    auth_value = auth_provider if force_auth_provider else (data.get("auth_provider") or auth_provider)
+    update = {
+        "rating_key": rating_key,
+        "role": role_value,
+        "status": data.get("status") or "active",
+        "auth_provider": auth_value,
+    }
+    if email:
+        update["email"] = email
+    if not doc.exists:
+        update["created_at"] = firestore.SERVER_TIMESTAMP
+    doc_ref.set(update, merge=True)
+    data.update(update)
+    return data
+
+
+def build_user_context(user_id: str, auth_provider: str, user_doc: Optional[dict], default_role: str) -> Optional[dict]:
+    if user_doc and user_doc.get("status") == "disabled":
+        return None
+    rating_key = (user_doc or {}).get("rating_key") or rating_key_for_user_id(user_id)
+    if user_doc is not None and not user_doc.get("rating_key") and db:
+        db.collection(USERS_COLLECTION).document(user_id).set({"rating_key": rating_key}, merge=True)
+    role = (user_doc or {}).get("role") or default_role
+    return {"id": user_id, "role": role, "auth_provider": auth_provider, "rating_key": rating_key}
+
+
+def resolve_basic_user(username: str, password: str) -> Optional[dict]:
+    if AUTH_USERNAME and AUTH_PASSWORD and username == AUTH_USERNAME and password == AUTH_PASSWORD:
+        user_doc = ensure_user_record(
+            username,
+            role="admin",
+            auth_provider="basic",
+            force_role=True,
+            force_auth_provider=True,
+        )
+        return build_user_context(username, "basic", user_doc, default_role="admin")
+
+    user_doc = get_user_doc(username)
+    if not user_doc:
+        return None
+    if user_doc.get("auth_provider") not in ("basic", "any"):
+        return None
+    stored_hash = user_doc.get("password_hash")
+    if not stored_hash or not check_password_hash(stored_hash, password):
+        return None
+    return build_user_context(username, "basic", user_doc, default_role="user")
+
+
+def resolve_google_user(email: str) -> Optional[dict]:
+    is_admin = AUTH_GOOGLE and email == AUTH_GOOGLE
+    if is_admin:
+        user_doc = ensure_user_record(
+            email,
+            role="admin",
+            auth_provider="google",
+            email=email,
+            force_role=True,
+            force_auth_provider=True,
+        )
+        return build_user_context(email, "google", user_doc, default_role="admin")
+
+    user_doc = ensure_user_record(
+        email,
+        role="user",
+        auth_provider="google",
+        email=email,
+        force_role=True,
+        force_auth_provider=True,
+    )
+    return build_user_context(email, "google", user_doc, default_role="user")
+
+
+def resolve_request_user() -> Optional[dict]:
+    if AUTH_GOOGLE and session.get("user"):
+        user = resolve_google_user(session.get("user"))
+        if user:
+            return user
+    auth = request.authorization
+    if auth:
+        return resolve_basic_user(auth.username, auth.password)
+    return None
+
+
+def current_user() -> dict:
+    user = getattr(g, "current_user", None)
+    if not user:
+        raise RuntimeError("User context missing for authenticated route.")
+    return user
+
+
+LAST_SEEN_INTERVAL = timedelta(minutes=15)
+
+
+def touch_user_activity(user: dict) -> None:
+    if not db or not user:
+        return
+    now = datetime.now(timezone.utc)
+    session_key = f"last_seen_at:{user.get('id')}"
+    last_seen_str = session.get(session_key)
+    if last_seen_str:
+        try:
+            last_seen = datetime.fromisoformat(last_seen_str)
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if now - last_seen < LAST_SEEN_INTERVAL:
+                return
+        except ValueError:
+            pass
+    try:
+        db.collection(USERS_COLLECTION).document(user["id"]).set(
+            {"last_seen_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        )
+        session[session_key] = now.isoformat()
+    except Exception as e:
+        print(f"⚠️  Failed to update user activity: {e}")
+
 
 # Perform checks before initializing the app
 check_prerequisites()
@@ -203,7 +354,7 @@ else:
 # --- Auth Decorator ---
 def check_auth(username, password):
     """Checks if the username and password are correct."""
-    return username == AUTH_USERNAME and password == AUTH_PASSWORD
+    return resolve_basic_user(username, password) is not None
 
 def authenticate():
     """Sends a 401 response that enables basic auth."""
@@ -215,26 +366,31 @@ def authenticate():
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # 1. Check active Google Session
-        if AUTH_GOOGLE and session.get('user') == AUTH_GOOGLE:
+        user = resolve_request_user()
+        if user:
+            g.current_user = user
+            touch_user_activity(user)
             return f(*args, **kwargs)
 
-        # 2. Check Basic Auth (Allow even if Google is enabled)
-        auth = request.authorization
-        if auth and check_auth(auth.username, auth.password):
-            return f(*args, **kwargs)
-
-        # 3. Google Auth (Exclusive if enabled)
         if AUTH_GOOGLE and not session.get('prefer_legacy'):
             if not google:
                 return Response("Configuration Error: AUTH_GOOGLE is set but Google Client is not initialized. Check server logs for missing client_secret.json.", 500)
-            
+
             if session.get('google_attempted'):
-                return Response(f"Access Denied: Your user is not authorized.<br><a href='{url_for('login_google')}'>Try again</a><br>or <a href='{url_for('login_legacy')}'>Legacy Login</a>", 403)
-            
+                return Response(f"Access Denied: Your account is disabled.<br><a href='{url_for('login_google')}'>Try again</a><br>or <a href='{url_for('login_legacy')}'>Legacy Login</a>", 403)
+
             return redirect(url_for('login_google'))
 
         return authenticate()
+    return decorated
+
+def requires_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = current_user()
+        if user.get("role") != "admin":
+            return Response("Access Denied: Admin privileges required.", 403)
+        return f(*args, **kwargs)
     return decorated
 
 # --- Helper Functions ---
@@ -251,36 +407,169 @@ def extract_index_error_info(error: Exception):
         summary = "Firestore query requires a composite index."
     return {"summary": summary, "link": link, "raw": message}
 
-def get_filtered_videos_list(db, filters):
-    """Reusable function to query and filter videos based on criteria."""
+
+def get_last_activity_ts(user_data: dict) -> Optional[datetime]:
+    value = user_data.get("last_seen_at") or user_data.get("created_at")
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
+    return None
+
+
+def format_ts(value: Optional[datetime]) -> str:
+    if not value:
+        return "never"
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def is_protected_user(user_id: str, user_data: dict, current_user_id: str) -> bool:
+    if user_id == current_user_id:
+        return True
+    if AUTH_GOOGLE and user_id == AUTH_GOOGLE:
+        return True
+    if AUTH_USERNAME and user_id == AUTH_USERNAME:
+        return True
+    if user_data.get("role") == "admin":
+        return True
+    return False
+
+
+def delete_user_and_ratings(user_id: str) -> dict:
+    if not db:
+        return {"deleted": False, "ratings_removed": 0}
+    user_doc = db.collection(USERS_COLLECTION).document(user_id).get()
+    if not user_doc.exists:
+        return {"deleted": False, "ratings_removed": 0}
+    user_data = user_doc.to_dict() or {}
+    rating_key = user_data.get("rating_key") or rating_key_for_user_id(user_id)
+
+    batch = db.batch()
+    pending = 0
+    removed = 0
+    docs = db.collection(COLLECTION_NAME).stream()
+    for doc in docs:
+        data = doc.to_dict() or {}
+        ratings = data.get("ratings") or {}
+        if rating_key not in ratings:
+            continue
+        batch.update(doc.reference, {f"ratings.{rating_key}": firestore.DELETE_FIELD})
+        pending += 1
+        removed += 1
+        if pending >= 400:
+            batch.commit()
+            batch = db.batch()
+            pending = 0
+    if pending:
+        batch.commit()
+
+    db.collection(USERS_COLLECTION).document(user_id).delete()
+    return {"deleted": True, "ratings_removed": removed}
+
+def coerce_int(value, default):
     try:
-        base_query = db.collection(COLLECTION_NAME)
-        if filters['exclude_rejected']:
-            base_query = base_query.where(filter=firestore.FieldFilter("rejected", "==", False))
-        if filters['genre_filter'] != 'All':
-            base_query = base_query.where(filter=firestore.FieldFilter("genre", "==", filters['genre_filter']))
-        if filters['favorite_only']:
-            base_query = base_query.where(filter=firestore.FieldFilter("favorite", "==", True))
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
+
+def legacy_rating_from_video(video_data: dict) -> dict:
+    if not video_data or not video_data.get("date_rated"):
+        return {}
+    rating = {
+        "rating_music": video_data.get("rating_music", 3),
+        "rating_video": video_data.get("rating_video", 3),
+        "favorite": bool(video_data.get("favorite", False)),
+        "rejected": bool(video_data.get("rejected", False)),
+        "rated_at": video_data.get("date_rated"),
+    }
+    if video_data.get("genre"):
+        rating["genre_override"] = video_data.get("genre")
+    return rating
+
+
+def extract_user_rating(video_data: dict, user: dict) -> dict:
+    ratings = (video_data or {}).get("ratings") or {}
+    rating = ratings.get(user.get("rating_key")) or {}
+    if not rating and user.get("role") == "admin":
+        rating = legacy_rating_from_video(video_data)
+    return rating
+
+
+def merge_user_rating(video_data: dict, user: dict) -> dict:
+    rating = extract_user_rating(video_data, user)
+    merged = dict(video_data or {})
+    merged["rating_music"] = coerce_int(rating.get("rating_music", 3), 3)
+    merged["rating_video"] = coerce_int(rating.get("rating_video", 3), 3)
+    merged["favorite"] = bool(rating.get("favorite", False))
+    merged["rejected"] = bool(rating.get("rejected", False))
+    merged["date_rated"] = rating.get("rated_at")
+    merged["genre_ai"] = video_data.get("genre") if video_data else None
+    merged["genre_override"] = rating.get("genre_override")
+    merged["genre"] = rating.get("genre_override") or (video_data or {}).get("genre")
+    return merged
+
+
+def build_rating_update(doc_ref, user: dict, form) -> dict:
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise ValueError("Video not found.")
+    video_data = doc.to_dict() or {}
+    existing_rating = extract_user_rating(video_data, user)
+
+    base_genre = (video_data.get("genre") or "").strip()
+    submitted_genre = (form.get("genre") or "Unknown").strip()
+    genre_override = None
+    if submitted_genre:
+        if not base_genre or submitted_genre.lower() != base_genre.lower():
+            genre_override = submitted_genre
+
+    rated_at = existing_rating.get("rated_at") or firestore.SERVER_TIMESTAMP
+    rating_data = {
+        "rating_music": coerce_int(form.get("rating_music", 3), 3),
+        "rating_video": coerce_int(form.get("rating_video", 3), 3),
+        "favorite": "favorite" in form,
+        "rejected": "rejected" in form,
+        "rated_at": rated_at,
+        "updated_at": firestore.SERVER_TIMESTAMP,
+    }
+    if genre_override:
+        rating_data["genre_override"] = genre_override
+    return rating_data
+
+
+def get_filtered_videos_list(db, filters, user):
+    """Reusable function to filter videos based on user-specific criteria."""
+    try:
         candidate_videos = []
+        docs = db.collection(COLLECTION_NAME).stream()
+        for doc in docs:
+            video_data = doc.to_dict() or {}
+            rating = extract_user_rating(video_data, user)
+            rated_at = rating.get("rated_at")
+            rating_music = coerce_int(rating.get("rating_music", 3), 3)
+            rating_video = coerce_int(rating.get("rating_video", 3), 3)
+            favorite = bool(rating.get("favorite", False))
+            rejected = bool(rating.get("rejected", False))
+            effective_genre = rating.get("genre_override") or video_data.get("genre")
 
-        # Query 1: Rated
-        rated_query = base_query.where(
-            filter=firestore.FieldFilter("rating_music", ">=", filters['min_rating_music'])
-        )
-        rated_docs = rated_query.stream()
-        for doc in rated_docs:
-            video_data = doc.to_dict()
-            if video_data.get("date_rated") and video_data.get("rating_video", 0) >= filters['min_rating_video']:
-                candidate_videos.append(video_data)
+            if filters["exclude_rejected"] and rejected:
+                continue
+            if filters["favorite_only"] and not favorite:
+                continue
+            if filters["genre_filter"] != "All" and effective_genre != filters["genre_filter"]:
+                continue
 
-        # Query 2: Unrated
-        if filters['include_unrated']:
-            unrated_query = base_query.where(filter=firestore.FieldFilter("date_rated", "==", None))
-            unrated_docs = unrated_query.stream()
-            candidate_videos.extend([doc.to_dict() for doc in unrated_docs])
+            if rated_at:
+                if rating_music < filters["min_rating_music"]:
+                    continue
+                if rating_video < filters["min_rating_video"]:
+                    continue
+                candidate_videos.append(merge_user_rating(video_data, user))
+            elif filters["include_unrated"]:
+                candidate_videos.append(merge_user_rating(video_data, user))
 
-        candidate_videos.sort(key=lambda x: (str(x.get('artist') or '').lower(), str(x.get('track') or '').lower()))
+        candidate_videos.sort(key=lambda x: (str(x.get("artist") or "").lower(), str(x.get("track") or "").lower()))
         return candidate_videos, None
     except Exception as e:
         print(f"An error occurred while fetching/filtering videos: {e}")
@@ -331,7 +620,7 @@ def login_google():
     
     # Check if we need to force account selection (if user is already logged in but unauthorized)
     extra_params = {}
-    if session.get('user') and session.get('user') != AUTH_GOOGLE:
+    if session.get('user'):
         extra_params = {'prompt': 'select_account'}
 
     # Clear any existing session flags to ensure a fresh attempt
@@ -356,10 +645,8 @@ def auth_google_callback():
         # Store email regardless of authorization status
         if user_info and user_info.get('email'):
             session['user'] = user_info['email']
-
-        if user_info and user_info.get('email') == AUTH_GOOGLE:
-            # Clear the attempted flag on success
-            session.pop('google_attempted', None)
+            if resolve_google_user(user_info['email']):
+                session.pop('google_attempted', None)
     except Exception as e:
         print(f"Google Auth Error: {e}")
     
@@ -391,25 +678,13 @@ def index():
     """
     Landing page. Redirects to app if logged in, else shows login page.
     """
-    # Check if authenticated
-    is_logged_in = False
-    
-    # Google Check
-    if AUTH_GOOGLE and session.get('user') == AUTH_GOOGLE:
-        is_logged_in = True
-    
-    # Basic Auth Check
-    if not is_logged_in:
-        auth = request.authorization
-        if auth and check_auth(auth.username, auth.password):
-            is_logged_in = True
-    
-    if is_logged_in:
+    if resolve_request_user():
         return redirect(url_for('rating_mode'))
 
     unauthorized_email = None
-    if AUTH_GOOGLE and session.get('user') and session.get('user') != AUTH_GOOGLE:
-        unauthorized_email = session.get('user')
+    if AUTH_GOOGLE and session.get('user'):
+        if not resolve_google_user(session.get('user')):
+            unauthorized_email = session.get('user')
         
     return render_template('login.html', google_enabled=bool(AUTH_GOOGLE), unauthorized_email=unauthorized_email)
 
@@ -423,48 +698,36 @@ def rating_mode():
     if not db:
         return "Error: Firestore client not initialized.", 500
 
+    user = current_user()
     index_error = None
+    unrated_videos = []
+    videos_left = 0
 
-    # Fetch all unique genres for the dropdown
+    # Fetch genres and unrated videos in one pass to avoid relying on null field queries.
     try:
-        # Use .get() to fetch all documents at once. This can be more reliable
-        # for smaller collections than using a stream.
         docs = db.collection(COLLECTION_NAME).get()
         unique_genres = set()
         for doc in docs:
-            if doc.exists:
-                data = doc.to_dict()
-                if data and (genre := data.get('genre')):
-                    unique_genres.add(genre)
+            if not doc.exists:
+                continue
+            data = doc.to_dict() or {}
+            if genre := data.get("genre"):
+                unique_genres.add(genre)
+            rating = extract_user_rating(data, user)
+            if rating.get("genre_override"):
+                unique_genres.add(rating.get("genre_override"))
+            if not rating.get("rated_at"):
+                unrated_videos.append(merge_user_rating(data, user))
 
         unique_genres.discard("Unknown")
         sorted_genres = sorted(list(unique_genres))
+        videos_left = len(unrated_videos)
     except Exception as e:
-        print(f"An error occurred while fetching genres: {e}")
-        sorted_genres = []
-
-    # Query for unrated videos (where date_rated is None)
-    try:
-        query = db.collection(COLLECTION_NAME).where(filter=firestore.FieldFilter("date_rated", "==", None)).limit(20).stream()
-        unrated_videos = [doc.to_dict() for doc in query]
-    except Exception as e:
-        print(f"An error occurred while fetching unrated videos: {e}")
+        print(f"An error occurred while fetching videos: {e}")
         index_error = extract_index_error_info(e)
+        sorted_genres = []
         unrated_videos = []
-
-    # --- Get total count of unrated videos ---
-    videos_left = 0
-    try:
-        # Use a projection query to count unrated videos.
-        # We select no fields (keys only) to minimize cost and latency.
-        # This avoids the limitations of count() with null filters.
-        docs = db.collection(COLLECTION_NAME).where("date_rated", "==", None).select([]).stream()
-        videos_left = sum(1 for _ in docs)
-    except Exception as e:
-        print(f"Error counting videos for 'rate' page: {e}")
-        if not index_error:
-            index_error = extract_index_error_info(e)
-        videos_left = "N/A" # Display an error indicator
+        videos_left = 0
 
     if not unrated_videos:
         return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=0, index_error=index_error)
@@ -483,6 +746,8 @@ def playing_mode():
     """
     if not db:
         return "Error: Firestore client not initialized.", 500
+
+    user = current_user()
 
     # --- Get Filter Criteria ---
     # Filters can come from a POST (submitting the filter form) or GET (direct link, or redirect after save)
@@ -510,7 +775,7 @@ def playing_mode():
         'exclude_rejected': exclude_rejected,
     }
 
-    filtered_videos, index_error = get_filtered_videos_list(db, current_filters)
+    filtered_videos, index_error = get_filtered_videos_list(db, current_filters, user)
 
     videos_count = len(filtered_videos)
 
@@ -528,7 +793,16 @@ def playing_mode():
     # --- Fetch All Genres for Dropdowns ---
     try:
         docs = db.collection(COLLECTION_NAME).get()
-        unique_genres = {doc.to_dict().get('genre') for doc in docs if doc.exists and doc.to_dict().get('genre')}
+        unique_genres = set()
+        for doc in docs:
+            if not doc.exists:
+                continue
+            data = doc.to_dict() or {}
+            if data.get("genre"):
+                unique_genres.add(data.get("genre"))
+            rating = extract_user_rating(data, user)
+            if rating.get("genre_override"):
+                unique_genres.add(rating.get("genre_override"))
         unique_genres.discard("Unknown")
         sorted_genres = sorted(list(unique_genres))
     except Exception as e:
@@ -548,6 +822,9 @@ def admin_mode():
     if not db:
         return "Error: Firestore client not initialized.", 500
 
+    user = current_user()
+    is_admin = user.get("role") == "admin"
+
     try:
         # Fetch all documents to calculate stats
         # Note: For very large collections, this might be slow and expensive.
@@ -563,14 +840,15 @@ def admin_mode():
             data = doc.to_dict()
             if not data:
                 continue
-            
-            if data.get('date_rated'):
+
+            rating = extract_user_rating(data, user)
+            if rating.get("rated_at"):
                 rated_count += 1
-            if data.get('favorite'):
+            if rating.get("favorite"):
                 favorite_count += 1
-            if data.get('rejected'):
+            if rating.get("rejected"):
                 rejected_count += 1
-            
+
             genre = data.get('genre') or 'Unknown'
             genre_counts[genre] = genre_counts.get(genre, 0) + 1
 
@@ -603,16 +881,185 @@ def admin_mode():
         import_restricted = is_cloud and not has_cookies
 
         # Determine Authentication Status
-        if AUTH_GOOGLE and session.get('user') == AUTH_GOOGLE:
-            auth_status = session.get('user')
-        else:
-            auth_status = "legacy authentication (username/password)"
+        auth_status = f"{user.get('id')} ({user.get('role')})"
 
-        return render_template('admin.html', stats=stats, import_restricted=import_restricted, auth_status=auth_status)
+        import_requests = []
+        if is_admin:
+            try:
+                req_docs = db.collection(IMPORT_REQUESTS_COLLECTION).where("status", "==", "pending").stream()
+                for req in req_docs:
+                    req_data = req.to_dict() or {}
+                    req_data["id"] = req.id
+                    import_requests.append(req_data)
+                import_requests.sort(
+                    key=lambda r: r.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+                    reverse=True,
+                )
+                import_requests = import_requests[:50]
+            except Exception as e:
+                print(f"An error occurred while fetching import requests: {e}")
+
+        users = []
+        inactive_days = request.args.get("inactive_days", type=int)
+        if is_admin:
+            try:
+                now = datetime.now(timezone.utc)
+                for doc in db.collection(USERS_COLLECTION).stream():
+                    data = doc.to_dict() or {}
+                    last_seen = get_last_activity_ts(data)
+                    inactive = False
+                    if inactive_days and last_seen:
+                        inactive = (now - last_seen).days >= inactive_days
+                    users.append({
+                        "id": doc.id,
+                        "role": data.get("role") or "user",
+                        "status": data.get("status") or "active",
+                        "auth_provider": data.get("auth_provider") or "unknown",
+                        "last_seen": last_seen,
+                        "last_seen_display": format_ts(last_seen),
+                        "inactive": inactive,
+                        "protected": is_protected_user(doc.id, data, user.get("id")),
+                    })
+                users.sort(key=lambda u: (u["protected"], u["id"]))
+            except Exception as e:
+                print(f"An error occurred while fetching users: {e}")
+
+        return render_template(
+            'admin.html',
+            stats=stats,
+            import_restricted=import_restricted,
+            auth_status=auth_status,
+            is_admin=is_admin,
+            import_requests=import_requests,
+            request_submitted=bool(request.args.get("request_submitted")),
+            users=users,
+            user_message=request.args.get("user_message"),
+            inactive_days=inactive_days or "",
+        )
 
     except Exception as e:
         return f"An error occurred: {e}", 500
 
+
+@app.route("/request-import", methods=["POST"])
+@requires_auth
+def request_import():
+    """Allow non-admin users to suggest new imports for review."""
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+
+    user = current_user()
+    request_type = (request.form.get("request_type") or "").strip()
+    payload = (request.form.get("payload") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+
+    if request_type not in {"substack", "playlist", "video_ids"} or not payload:
+        return redirect(url_for("admin_mode"))
+
+    data = {
+        "requested_by": user.get("id"),
+        "request_type": request_type,
+        "payload": payload,
+        "notes": notes,
+        "status": "pending",
+        "created_at": firestore.SERVER_TIMESTAMP,
+    }
+    try:
+        db.collection(IMPORT_REQUESTS_COLLECTION).add(data)
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+
+    return redirect(url_for("admin_mode", request_submitted="1"))
+
+
+@app.route("/admin/import-request/<string:request_id>", methods=["POST"])
+@requires_auth
+@requires_admin
+def update_import_request(request_id):
+    """Update status for an import request."""
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+
+    user = current_user()
+    status = (request.form.get("status") or "").strip()
+    if status not in {"approved", "rejected", "imported"}:
+        return "Invalid status.", 400
+
+    try:
+        db.collection(IMPORT_REQUESTS_COLLECTION).document(request_id).update({
+            "status": status,
+            "processed_by": user.get("id"),
+            "processed_at": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+
+    return redirect(url_for("admin_mode"))
+
+
+@app.route("/admin/users/delete", methods=["POST"])
+@requires_auth
+@requires_admin
+def delete_user():
+    """Delete a user and remove their ratings."""
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+    user = current_user()
+    user_id = (request.form.get("user_id") or "").strip()
+    if not user_id:
+        return redirect(url_for("admin_mode", user_message="Missing user id."))
+
+    user_doc = get_user_doc(user_id)
+    if not user_doc:
+        return redirect(url_for("admin_mode", user_message="User not found."))
+
+    if is_protected_user(user_id, user_doc, user.get("id")):
+        return redirect(url_for("admin_mode", user_message="Cannot delete protected user."))
+
+    result = delete_user_and_ratings(user_id)
+    if result.get("deleted"):
+        msg = f"Deleted {user_id} and removed {result.get('ratings_removed', 0)} rating entries."
+    else:
+        msg = f"Failed to delete user {user_id}."
+    return redirect(url_for("admin_mode", user_message=msg))
+
+
+@app.route("/admin/users/purge", methods=["POST"])
+@requires_auth
+@requires_admin
+def purge_inactive_users():
+    """Delete users inactive for N days and remove their ratings."""
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+    user = current_user()
+    raw_days = (request.form.get("inactive_days") or "").strip()
+    try:
+        days = int(raw_days)
+    except ValueError:
+        days = 0
+
+    if days <= 0:
+        return redirect(url_for("admin_mode", user_message="Inactive days must be >= 1."))
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    deleted = 0
+    removed = 0
+
+    for doc in db.collection(USERS_COLLECTION).stream():
+        data = doc.to_dict() or {}
+        if is_protected_user(doc.id, data, user.get("id")):
+            continue
+        last_seen = get_last_activity_ts(data)
+        if not last_seen:
+            continue
+        if last_seen <= cutoff:
+            result = delete_user_and_ratings(doc.id)
+            if result.get("deleted"):
+                deleted += 1
+                removed += result.get("ratings_removed", 0)
+
+    msg = f"Deleted {deleted} inactive users; removed {removed} rating entries."
+    return redirect(url_for("admin_mode", user_message=msg, inactive_days=days))
 @app.route("/skip_video", methods=['POST'])
 @requires_auth
 def skip_video():
@@ -640,19 +1087,10 @@ def save_rating(video_id):
         return "Error: Firestore client not initialized.", 500
 
     try:
+        user = current_user()
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
-
-        # Prepare the data to update
-        update_data = {
-            'rating_music': int(request.form.get('rating_music', 3)),
-            'rating_video': int(request.form.get('rating_video', 3)),
-            'genre': request.form.get('genre', 'Unknown'),
-            'favorite': 'favorite' in request.form,
-            'rejected': 'rejected' in request.form,
-            'date_rated': firestore.SERVER_TIMESTAMP
-        }
-
-        doc_ref.update(update_data)
+        rating_data = build_rating_update(doc_ref, user, request.form)
+        doc_ref.update({f"ratings.{user.get('rating_key')}": rating_data})
 
     except Exception as e:
         return f"An error occurred: {e}", 500
@@ -671,16 +1109,10 @@ def save_play_rating(video_id):
         return "Error: Firestore client not initialized.", 500
 
     try:
+        user = current_user()
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
-        update_data = {
-            'rating_music': int(request.form.get('rating_music', 3)),
-            'rating_video': int(request.form.get('rating_video', 3)),
-            'genre': request.form.get('genre', 'Unknown'),
-            'favorite': 'favorite' in request.form,
-            'rejected': 'rejected' in request.form,
-            'date_rated': firestore.SERVER_TIMESTAMP
-        }
-        doc_ref.update(update_data)
+        rating_data = build_rating_update(doc_ref, user, request.form)
+        doc_ref.update({f"ratings.{user.get('rating_key')}": rating_data})
     except Exception as e:
         return f"An error occurred: {e}", 500
 
@@ -725,6 +1157,7 @@ def api_youtube_info():
 @requires_auth
 def export_playlist():
     """Exports filtered videos to a YouTube playlist."""
+    user = current_user()
     filters = {
         'min_rating_music': request.form.get('min_rating_music', 3, type=int),
         'min_rating_video': request.form.get('min_rating_video', 3, type=int),
@@ -734,7 +1167,7 @@ def export_playlist():
         'exclude_rejected': 'exclude_rejected' in request.form,
     }
     
-    videos, index_error = get_filtered_videos_list(db, filters)
+    videos, index_error = get_filtered_videos_list(db, filters, user)
     if index_error:
         return redirect(url_for('playing_mode', export_message="Error: Firestore index missing or building. Please open the page to see details.", **filters))
     yt = ingestion_get_youtube_service()
@@ -800,6 +1233,7 @@ def export_playlist():
 
 @app.route("/admin/import-playlist")
 @requires_auth
+@requires_admin
 def import_playlist():
     """Import videos from a YouTube playlist into Firestore."""
     raw_playlist = (request.args.get("playlist_id") or "").strip()
@@ -869,6 +1303,7 @@ def import_playlist():
 
 @app.route("/admin/import-video")
 @requires_auth
+@requires_admin
 def import_video():
     """Import one or more comma-separated YouTube video IDs into Firestore."""
     raw_ids = (request.args.get("video_ids") or "").replace("\n", ",")
@@ -926,6 +1361,7 @@ def import_video():
 
 @app.route("/admin/run-scraper")
 @requires_auth
+@requires_admin
 def run_scraper():
     """
     Executes the scrape_to_firestore.py script as a subprocess and streams the output.

@@ -47,6 +47,7 @@ Not needed except if you are really curious:
 
 - `update-genre.py` — Re-evaluates genre classification for existing Firestore docs.
 - `update-db-fields.py` — Backfills missing artist/track/ai_model fields in Firestore.
+- `migrate_ratings.py` — Migrates legacy root-level ratings into per-user `ratings` maps and can backfill `rand`.
 - `test-ai-model.py` — CLI for comparing Gemini model outputs on sample videos.
 
 ## Setup
@@ -76,7 +77,7 @@ Due to the nature of this project several configuration steps are needed. Here i
 | PROJECT_ID           | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
 | AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
-| AUTH_GOOGLE          | env-var with email of authorized user                        | .env         | Secret Manager |
+| AUTH_GOOGLE          | admin email (enables Google login; additional users via users collection) | .env | Secret Manager |
 | `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | Secret Manager |
 | `token.pickle`       | file which contains user credentials (access token and refresh token) which are used against the YouTube API | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
@@ -184,12 +185,34 @@ The application uses Firestore as the database. It's free for our usecase (the f
 
 ##### Data model
 
-Each document key is the YouTube `video_id` and stores fields like:
+Each document key is the YouTube `video_id` and stores global metadata like:
 
-- `title`, `source` (Substack URL), `genre`, `rating_music`, `rating_video`
-- `artist`, `track`, `ai_model`, `genre_ai_fidelity`, `genre_ai_remarks`
-- `favorite` (bool), `rejected` (bool)
-- `date_prism`, `date_substack`, `date_youtube`, `date_rated`
+- `title`, `source` (Substack URL), `genre` (AI), `artist`, `track`
+- `ai_model`, `genre_ai_fidelity`, `genre_ai_remarks`
+- `date_prism`, `date_substack`, `date_youtube`, `rand` (for random selection)
+
+User-specific ratings live inside the video document under `ratings.<rating_key>`:
+
+- `rating_music`, `rating_video`, `favorite`, `rejected`
+- `rated_at`, `updated_at`
+- `genre_override` (optional user-specific override)
+
+The `users` collection stores per-user metadata:
+
+- `role` (`admin` | `user`), `status` (`active` | `disabled`), `auth_provider`
+- `rating_key` (safe field key for ratings map)
+
+##### Multi-user setup
+
+Any Google account can log in; users are auto-created on first login. The admin is still defined by `AUTH_GOOGLE` (or legacy basic auth).
+
+1. Migrate legacy ratings to the admin user (run once):
+
+```bash
+python migrate_ratings.py --add-rand
+```
+
+2. Manage users in the admin UI (delete inactive users and their ratings).
 
 #### YouTube Data API v3
 

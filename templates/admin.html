@@ -28,6 +28,12 @@
         </select>
     </div>
     
+    {% if request_submitted %}
+    <div class="stat-card" style="border-left: 4px solid #4caf50;">
+        ✅ Request submitted. The admin will review it.
+    </div>
+    {% endif %}
+
     <h2>General Statistics</h2>
     <div class="stat-card">
         <div class="stat-row">
@@ -35,15 +41,15 @@
             <span>{{ stats.total_entries }}</span>
         </div>
         <div class="stat-row">
-            <strong>Rated Entries:</strong>
+            <strong>Rated Entries (you):</strong>
             <span>{{ stats.rated_count }} ({{ stats.rated_pct }}%)</span>
         </div>
         <div class="stat-row">
-            <strong>Favorites:</strong>
+            <strong>Favorites (you):</strong>
             <span>{{ stats.favorite_count }} ({{ stats.favorite_pct }}%)</span>
         </div>
         <div class="stat-row">
-            <strong>Rejected:</strong>
+            <strong>Rejected (you):</strong>
             <span>{{ stats.rejected_count }} ({{ stats.rejected_pct }}%)</span>
         </div>
     </div>
@@ -70,61 +76,118 @@
 
     <h2 style="margin-top: 40px;">Video Import</h2>
     <div class="stat-card">
-        {% if import_restricted %}
-        <h3>from Substack or YouTube playlists/IDs</h3>
-        <div style="background-color: #3e3e3e; border-left: 5px solid #ffcc00; padding: 15px; margin-top: 10px;">
-            <strong style="color: #ffcc00;">Functionality Restricted</strong>
-            <p style="margin-top: 10px; margin-bottom: 0;">
-                Importing videos is currently disabled because this instance is running in the cloud and no <code>cookies.txt</code> file was found. 
-                YouTube blocks automated requests from cloud IP addresses.
-            </p>
-            <p style="margin-top: 10px; margin-bottom: 0;">
-                To enable this feature, please run the application locally or deploy a valid <code>cookies.txt</code> file.
-            </p>
-        </div>
+        {% if is_admin %}
+            {% if import_requests %}
+            <h3>Pending Import Requests</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Payload</th>
+                        <th>Requested By</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in import_requests %}
+                    <tr>
+                        <td>{{ req.request_type }}</td>
+                        <td style="max-width: 400px; word-break: break-word;">{{ req.payload }}</td>
+                        <td>{{ req.requested_by }}</td>
+                        <td>{{ req.status }}</td>
+                        <td>
+                            <form action="{{ url_for('update_import_request', request_id=req.id) }}" method="post" style="display: flex; gap: 6px;">
+                                <button type="submit" name="status" value="imported" class="next-button" style="width: auto;">Mark Imported</button>
+                                <button type="submit" name="status" value="rejected" class="next-button" style="width: auto; background-color: #d32f2f;">Reject</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: #aaa; margin: 0;">No pending import requests.</p>
+            {% endif %}
+
+            {% if import_restricted %}
+            <h3>from Substack or YouTube playlists/IDs</h3>
+            <div style="background-color: #3e3e3e; border-left: 5px solid #ffcc00; padding: 15px; margin-top: 10px;">
+                <strong style="color: #ffcc00;">Functionality Restricted</strong>
+                <p style="margin-top: 10px; margin-bottom: 0;">
+                    Importing videos is currently disabled because this instance is running in the cloud and no <code>cookies.txt</code> file was found. 
+                    YouTube blocks automated requests from cloud IP addresses.
+                </p>
+                <p style="margin-top: 10px; margin-bottom: 0;">
+                    To enable this feature, please run the application locally or deploy a valid <code>cookies.txt</code> file.
+                </p>
+            </div>
+            {% else %}
+            <h3>from Substack</h3>
+            <form id="scraper-form" style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center;">
+                    <label for="limit_posts" style="width: 280px; font-size: 0.9em;">--limit-substack-posts (0 for all)</label>
+                    <input type="text" id="limit_posts" name="limit_posts" value="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+                </div>
+                <div style="display: flex; align-items: center;">
+                    <label for="limit_entries" style="width: 280px; font-size: 0.9em;">--limit-new-db-entries (0 for all)</label>
+                    <input type="text" id="limit_entries" name="limit_entries" value="10" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+                </div>
+                <div style="display: flex; align-items: center;">
+                     <label for="substack_url" style="width: 280px; font-size: 0.9em;">--substack</label>
+                     <input type="text" id="substack_url" name="substack_url" value="https://goodmusic.substack.com/archive" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
+                </div>
+                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+            </form>
+            
+            <pre id="scraper-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 300px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+
+            <h3 style="margin-top: 20px;">from YouTube playlist</h3>
+            <form id="playlist-form" style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center;">
+                    <label for="playlist_id" style="width: 280px; font-size: 0.9em;">Playlist ID (or full URL)</label>
+                    <input type="text" id="playlist_id" name="playlist_id" placeholder="PLxxxx" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
+                </div>
+                <div style="display: flex; align-items: center;">
+                    <label for="playlist_limit" style="width: 280px; font-size: 0.9em;">Limit (0 for all)</label>
+                    <input type="number" id="playlist_limit" name="playlist_limit" value="0" min="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+                </div>
+                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+            </form>
+            <pre id="playlist-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 220px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+
+            <h3 style="margin-top: 20px;">from YouTube ID</h3>
+            <form id="single-video-form" style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center;">
+                    <label for="video_ids" style="width: 280px; font-size: 0.9em;">Video IDs (comma or newline separated)</label>
+                    <input type="text" id="video_ids" name="video_ids" placeholder="abc123, def456" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
+                </div>
+                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+            </form>
+            <pre id="single-video-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 180px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+            {% endif %}
         {% else %}
-        <h3>from Substack</h3>
-        <form id="scraper-form" style="display: flex; flex-direction: column; gap: 10px;">
-            <div style="display: flex; align-items: center;">
-                <label for="limit_posts" style="width: 280px; font-size: 0.9em;">--limit-substack-posts (0 for all)</label>
-                <input type="text" id="limit_posts" name="limit_posts" value="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
-            </div>
-            <div style="display: flex; align-items: center;">
-                <label for="limit_entries" style="width: 280px; font-size: 0.9em;">--limit-new-db-entries (0 for all)</label>
-                <input type="text" id="limit_entries" name="limit_entries" value="10" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
-            </div>
-            <div style="display: flex; align-items: center;">
-                 <label for="substack_url" style="width: 280px; font-size: 0.9em;">--substack</label>
-                 <input type="text" id="substack_url" name="substack_url" value="https://goodmusic.substack.com/archive" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
-            </div>
-            <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
-        </form>
-        
-        <pre id="scraper-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 300px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
-
-        <h3 style="margin-top: 20px;">from YouTube playlist</h3>
-        <form id="playlist-form" style="display: flex; flex-direction: column; gap: 10px;">
-            <div style="display: flex; align-items: center;">
-                <label for="playlist_id" style="width: 280px; font-size: 0.9em;">Playlist ID (or full URL)</label>
-                <input type="text" id="playlist_id" name="playlist_id" placeholder="PLxxxx" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
-            </div>
-            <div style="display: flex; align-items: center;">
-                <label for="playlist_limit" style="width: 280px; font-size: 0.9em;">Limit (0 for all)</label>
-                <input type="number" id="playlist_limit" name="playlist_limit" value="0" min="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
-            </div>
-            <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
-        </form>
-        <pre id="playlist-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 220px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
-
-        <h3 style="margin-top: 20px;">from YouTube ID</h3>
-        <form id="single-video-form" style="display: flex; flex-direction: column; gap: 10px;">
-            <div style="display: flex; align-items: center;">
-                <label for="video_ids" style="width: 280px; font-size: 0.9em;">Video IDs (comma or newline separated)</label>
-                <input type="text" id="video_ids" name="video_ids" placeholder="abc123, def456" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
-            </div>
-            <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
-        </form>
-        <pre id="single-video-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 180px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+            <h3>Suggest an Import</h3>
+            <form action="{{ url_for('request_import') }}" method="post" style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center;">
+                    <label for="request_type" style="width: 180px; font-size: 0.9em;">Type</label>
+                    <select id="request_type" name="request_type" required style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 220px;">
+                        <option value="substack">Substack URL</option>
+                        <option value="playlist">YouTube Playlist</option>
+                        <option value="video_ids">YouTube Video IDs</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center;">
+                    <label for="payload" style="width: 180px; font-size: 0.9em;">Payload</label>
+                    <textarea id="payload" name="payload" required rows="3" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%;"></textarea>
+                </div>
+                <div style="display: flex; align-items: center;">
+                    <label for="notes" style="width: 180px; font-size: 0.9em;">Notes</label>
+                    <input type="text" id="notes" name="notes" placeholder="Optional" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%;">
+                </div>
+                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Submit Request</button>
+            </form>
+            <p style="margin-top: 10px; color: #aaa;">Requests are reviewed by the admin before importing.</p>
         {% endif %}
     </div>
 
@@ -138,6 +201,57 @@
             <a href="{{ url_for('logout') }}" class="button-link" style="background-color: #d32f2f; color: white;">Logout</a>
         </div>
     </div>
+
+    {% if is_admin %}
+    <h2 style="margin-top: 40px;">User Management</h2>
+    <div class="stat-card">
+        {% if user_message %}
+        <div style="margin-bottom: 10px; color: #ffcc00;">{{ user_message }}</div>
+        {% endif %}
+        <form action="{{ url_for('purge_inactive_users') }}" method="post" style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+            <label for="inactive_days" style="min-width: 220px;">Delete users inactive for (days):</label>
+            <input type="number" id="inactive_days" name="inactive_days" min="1" value="{{ inactive_days or 30 }}" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 120px;">
+            <button type="submit" class="next-button" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete inactive users and their ratings?');">Delete Inactive</button>
+        </form>
+        {% if users %}
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Auth</th>
+                    <th>Last Seen</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr {% if u.inactive %}style="color: #ffcc00;"{% endif %}>
+                    <td>{{ u.id }}</td>
+                    <td>{{ u.role }}</td>
+                    <td>{{ u.status }}</td>
+                    <td>{{ u.auth_provider }}</td>
+                    <td>{{ u.last_seen_display }}</td>
+                    <td>
+                        {% if u.protected %}
+                        <span style="color: #888;">Protected</span>
+                        {% else %}
+                        <form action="{{ url_for('delete_user') }}" method="post" style="display: inline;">
+                            <input type="hidden" name="user_id" value="{{ u.id }}">
+                            <button type="submit" class="next-button" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete user {{ u.id }} and all ratings?');">Delete</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="margin: 0; color: #aaa;">No users found.</p>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <h2 style="margin-top: 40px;">Database</h2>
     <div class="stat-card">
@@ -174,44 +288,53 @@
             });
     }
 
-    document.getElementById('scraper-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const output = document.getElementById('scraper-output');
-        const limitPosts = document.getElementById('limit_posts').value;
-        const limitEntries = document.getElementById('limit_entries').value;
-        const substackUrl = document.getElementById('substack_url').value;
+    const scraperForm = document.getElementById('scraper-form');
+    if (scraperForm) {
+        scraperForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const output = document.getElementById('scraper-output');
+            const limitPosts = document.getElementById('limit_posts').value;
+            const limitEntries = document.getElementById('limit_entries').value;
+            const substackUrl = document.getElementById('substack_url').value;
 
-        const url = new URL("{{ url_for('run_scraper') }}", window.location.origin);
-        url.searchParams.append('limit_posts', limitPosts);
-        url.searchParams.append('limit_entries', limitEntries);
-        url.searchParams.append('substack_url', substackUrl);
+            const url = new URL("{{ url_for('run_scraper') }}", window.location.origin);
+            url.searchParams.append('limit_posts', limitPosts);
+            url.searchParams.append('limit_entries', limitEntries);
+            url.searchParams.append('substack_url', substackUrl);
 
-        streamToOutput(url, output);
-    });
+            streamToOutput(url, output);
+        });
+    }
 
-    document.getElementById('playlist-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const output = document.getElementById('playlist-output');
-        const playlistId = document.getElementById('playlist_id').value;
-        const limit = document.getElementById('playlist_limit').value;
+    const playlistForm = document.getElementById('playlist-form');
+    if (playlistForm) {
+        playlistForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const output = document.getElementById('playlist-output');
+            const playlistId = document.getElementById('playlist_id').value;
+            const limit = document.getElementById('playlist_limit').value;
 
-        const url = new URL("{{ url_for('import_playlist') }}", window.location.origin);
-        url.searchParams.append('playlist_id', playlistId);
-        url.searchParams.append('limit', limit);
+            const url = new URL("{{ url_for('import_playlist') }}", window.location.origin);
+            url.searchParams.append('playlist_id', playlistId);
+            url.searchParams.append('limit', limit);
 
-        streamToOutput(url, output);
-    });
+            streamToOutput(url, output);
+        });
+    }
 
-    document.getElementById('single-video-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const output = document.getElementById('single-video-output');
-        const videoIds = document.getElementById('video_ids').value;
+    const singleVideoForm = document.getElementById('single-video-form');
+    if (singleVideoForm) {
+        singleVideoForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const output = document.getElementById('single-video-output');
+            const videoIds = document.getElementById('video_ids').value;
 
-        const url = new URL("{{ url_for('import_video') }}", window.location.origin);
-        url.searchParams.append('video_ids', videoIds);
+            const url = new URL("{{ url_for('import_video') }}", window.location.origin);
+            url.searchParams.append('video_ids', videoIds);
 
-        streamToOutput(url, output);
-    });
+            streamToOutput(url, output);
+        });
+    }
 </script>
 
 </body>

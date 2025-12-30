@@ -4,6 +4,7 @@ import shutil
 import time
 import json
 import base64
+import random
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional
 
@@ -429,10 +430,15 @@ def download_audio_for_analysis(video_id: str) -> str | None:
     return None
 
 
-def predict_genre(model, video_id: str, video_title: str, video_description: str = "") -> Optional[tuple[str, int, str, str, str]]:
+def predict_genre(
+    model,
+    video_id: str,
+    video_title: str,
+    video_description: str = "",
+) -> tuple[Optional[tuple[str, int, str, str, str]], Optional[str]]:
     """Uses Gemini to predict genre, confidence, reasoning, artist, and track."""
     if not model:
-        return "Unknown", 0, "AI model not available.", "", ""
+        return None, "model_unavailable"
 
     allowed_genres = [
         "Avant-garde & experimental",
@@ -455,7 +461,7 @@ def predict_genre(model, video_id: str, video_title: str, video_description: str
     
     # 1) Refrain from calling AI-API if audio download failed
     if not audio_path:
-        return None
+        return None, "audio_download_failed"
 
     parts = []
 
@@ -530,7 +536,7 @@ def predict_genre(model, video_id: str, video_title: str, video_description: str
                     time.sleep(retry_delay)
                     retry_delay *= 2
                     continue
-            return "Unknown", 0, f"API Error: {str(e)}", "", ""
+            return None, f"api_error: {str(e)}"
 
     try:
         text = response.text.strip()
@@ -548,9 +554,9 @@ def predict_genre(model, video_id: str, video_title: str, video_description: str
         if genre not in allowed_genres and genre != "Unknown":
             genre = "Unknown"
         
-        return genre, analysis.fidelity, analysis.remarks, analysis.artist, analysis.track
+        return (genre, analysis.fidelity, analysis.remarks, analysis.artist, analysis.track), None
     except Exception as e:
-        return "Unknown", 0, str(e), "", ""
+        return None, f"parse_error: {str(e)}"
     finally:
         if audio_path and os.path.exists(audio_path):
             try:
@@ -583,37 +589,35 @@ def ingest_single_video(
         return {"status": "unavailable", "message": "Video is private or unavailable."}
 
     title, description, date_youtube = metadata
-    prediction = predict_genre(model, video_id, title, description)
+    prediction, error = predict_genre(model, video_id, title, description)
 
     if prediction is None:
-        return {
-            "status": "error",
-            "message": (
-                "Audio download failed. This often happens when YouTube blocks the IP address (e.g. in Cloud Run). "
-                "To fix this, either run the script from a residential IP or provide a 'cookies.txt' file "
-                "exported from a logged-in browser session in the working directory."
-            ),
-        }
+        if error == "audio_download_failed":
+            return {
+                "status": "error",
+                "message": (
+                    "Audio download failed. This often happens when YouTube blocks the IP address (e.g. in Cloud Run). "
+                    "To fix this, either run the script from a residential IP or provide a 'cookies.txt' file "
+                    "exported from a logged-in browser session in the working directory."
+                ),
+            }
+        return {"status": "error", "message": f"AI analysis failed: {error}"}
 
     genre, fidelity, remarks, artist, track = prediction
 
     data = {
         "video_id": video_id,
         "source": source,
-        "rating_music": 3,
-        "rating_video": 3,
         "genre": genre,
         "genre_ai_fidelity": fidelity,
         "genre_ai_remarks": remarks,
         "ai_model": model_name,
         "artist": artist,
         "track": track,
-        "favorite": False,
-        "rejected": False,
+        "rand": random.random(),
         "title": title,
         "date_prism": firestore.SERVER_TIMESTAMP,
         "date_youtube": date_youtube,
-        "date_rated": None,
     }
 
     if extra_fields:

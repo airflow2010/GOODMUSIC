@@ -180,6 +180,10 @@
             <p><strong>date_substack:</strong> {{ video.date_substack }}</p>
             <p><strong>date_prism:</strong> {{ video.date_prism or video.created_at }}</p>
             <p><strong>date_rated:</strong> {{ video.date_rated }}</p>
+            <p><strong>genre_ai:</strong> {{ video.genre_ai }}</p>
+            {% if video.genre_override %}
+            <p><strong>genre_override:</strong> {{ video.genre_override }}</p>
+            {% endif %}
             <p><strong>genre_ai_fidelity:</strong> {{ video.genre_ai_fidelity }}</p>
             <p><strong>genre_ai_remarks:</strong> {{ video.genre_ai_remarks }}</p>
         </div>

@@ -43,7 +43,7 @@
                 <label for="rating_music">rating_music:</label>
                 <select id="rating_music" name="rating_music" required class="{% if not video.date_rated %}unrated{% endif %}">
                     {% for val, desc in music_ratings.items()|sort(reverse=True) %}
-                        <option value="{{ val }}" {% if val == 3 %}selected{% endif %}>{{ desc }}</option>
+                        <option value="{{ val }}" {% if val == video.rating_music %}selected{% endif %}>{{ desc }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -51,7 +51,7 @@
                 <label for="rating_video">rating_video:</label>
                 <select id="rating_video" name="rating_video" required class="{% if not video.date_rated %}unrated{% endif %}">
                     {% for val, desc in video_ratings.items()|sort(reverse=True) %}
-                        <option value="{{ val }}" {% if val == 3 %}selected{% endif %}>{{ desc }}</option>
+                        <option value="{{ val }}" {% if val == video.rating_video %}selected{% endif %}>{{ desc }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -70,11 +70,11 @@
             <!-- Booleans -->
             <div style="display: flex; gap: 20px;">
                 <div class="checkbox-group">
-                    <input type="checkbox" id="favorite" name="favorite">
+                    <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
                     <label for="favorite">⭐ favorite</label>
                 </div>
                 <div class="checkbox-group">
-                    <input type="checkbox" id="rejected" name="rejected">
+                    <input type="checkbox" id="rejected" name="rejected" {% if video.rejected %}checked{% endif %}>
                     <label for="rejected">❌ rejected</label>
                 </div>
             </div>
@@ -94,6 +94,10 @@
             <p><strong>date_substack:</strong> {{ video.date_substack }}</p>
             <p><strong>date_prism:</strong> {{ video.date_prism or video.created_at }}</p>
             <p><strong>date_rated:</strong> {{ video.date_rated }}</p>
+            <p><strong>genre_ai:</strong> {{ video.genre_ai }}</p>
+            {% if video.genre_override %}
+            <p><strong>genre_override:</strong> {{ video.genre_override }}</p>
+            {% endif %}
             <p><strong>genre_ai_fidelity:</strong> {{ video.genre_ai_fidelity }}</p>
             <p><strong>genre_ai_remarks:</strong> {{ video.genre_ai_remarks }}</p>
         </div>
