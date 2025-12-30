@@ -1,3 +1,4 @@
+import argparse
 import sys
 import time
 
@@ -37,9 +38,14 @@ def main():
     Iterates through music videos in Firestore and re-evaluates the genre
     if the AI model used previously differs from the configured PREFERRED_AI_MODEL.
     """
+    parser = argparse.ArgumentParser(description="Update AI-derived genre metadata in Firestore.")
+    parser.add_argument("--auto-accept", action="store_true", help="Apply AI suggestions without prompting.")
+    args = parser.parse_args()
+
     print("🚀 Starting Genre Update Script...")
     print(f"   - Preferred AI Model: {PREFERRED_AI_MODEL}")
     print(f"   - Target Collection: {COLLECTION_NAME}")
+    print(f"   - Auto-accept: {'yes' if args.auto_accept else 'no'}")
     print("-" * 50)
 
     # 1. Initialize services
@@ -125,7 +131,7 @@ def main():
             print(f"   - old remark: {old_remark}")
             print(f"   - new remark: {new_remark}")
 
-            if ask_for_confirmation("   - Should the remark and AI model info be updated?"):
+            if args.auto_accept or ask_for_confirmation("   - Should the remark and AI model info be updated?"):
                 updates = {
                     "genre_ai_remarks": new_remark,
                     "genre_ai_fidelity": new_fidelity,
@@ -142,7 +148,7 @@ def main():
             print(f"   - new remark: {new_remark}")
             print("-" * 20)
 
-            if ask_for_confirmation(f"   - Update genre to '{new_genre}' and save new details?"):
+            if args.auto_accept or ask_for_confirmation(f"   - Update genre to '{new_genre}' and save new details?"):
                 updates = {
                     "genre": new_genre,
                     "genre_ai_remarks": new_remark,
