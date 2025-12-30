@@ -38,6 +38,7 @@
         </div>
 
         <form action="{{ url_for('save_rating', video_id=video.video_id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <!-- Ratings -->
             <div>
                 <label for="rating_music">rating_music:</label>

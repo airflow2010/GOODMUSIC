@@ -1,9 +1,11 @@
 import os
 import json
 import base64
+import secrets
 import sys
 import subprocess
 import random
+import time
 from functools import wraps
 from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +26,17 @@ load_dotenv()
 COLLECTION_NAME = "musicvideos"
 USERS_COLLECTION = "users"
 IMPORT_REQUESTS_COLLECTION = "import_requests"
+
+CSRF_TOKEN_KEY = "_csrf_token"
+LOGIN_RATE_LIMIT = 10
+LOGIN_RATE_WINDOW_SECONDS = 600
+IMPORT_REQUEST_RATE_LIMIT = 10
+IMPORT_REQUEST_WINDOW_SECONDS = 3600
+MAX_IMPORT_PAYLOAD_LEN = 2000
+MAX_IMPORT_NOTES_LEN = 500
+MAX_IMPORT_VIDEO_IDS = 50
+
+RATE_LIMIT_BUCKETS = {}
 
 # --- Google OAuth Configuration (will be set later by reading client_secret.json)---
 GOOGLE_CLIENT_ID = None
@@ -160,6 +173,45 @@ def check_firestore_access(db_client):
         sys.exit(1)
 
 
+def get_client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def get_csrf_token() -> str:
+    token = session.get(CSRF_TOKEN_KEY)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session[CSRF_TOKEN_KEY] = token
+    return token
+
+
+def validate_csrf() -> bool:
+    token = session.get(CSRF_TOKEN_KEY)
+    if not token:
+        return False
+    submitted = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+    if not submitted:
+        return False
+    return secrets.compare_digest(token, submitted)
+
+
+def rate_limit_exceeded(key: str, limit: int, window_seconds: int) -> bool:
+    now = time.time()
+    bucket = RATE_LIMIT_BUCKETS.get(key, [])
+    bucket = [ts for ts in bucket if now - ts < window_seconds]
+    RATE_LIMIT_BUCKETS[key] = bucket
+    return len(bucket) >= limit
+
+
+def rate_limit_hit(key: str) -> None:
+    bucket = RATE_LIMIT_BUCKETS.setdefault(key, [])
+    bucket.append(time.time())
+
+
+
 def rating_key_for_user_id(user_id: str) -> str:
     token = base64.urlsafe_b64encode(user_id.encode("utf-8")).decode("ascii").rstrip("=")
     return token or "user"
@@ -260,13 +312,26 @@ def resolve_google_user(email: str) -> Optional[dict]:
 
 
 def resolve_request_user() -> Optional[dict]:
+    g.auth_rate_limited = False
     if AUTH_GOOGLE and session.get("user"):
         user = resolve_google_user(session.get("user"))
         if user:
             return user
     auth = request.authorization
     if auth:
-        return resolve_basic_user(auth.username, auth.password)
+        ip = get_client_ip()
+        ip_key = f"login:ip:{ip}"
+        user_key = f"login:user:{auth.username}"
+        if rate_limit_exceeded(ip_key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS) or rate_limit_exceeded(
+            user_key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS
+        ):
+            g.auth_rate_limited = True
+            return None
+        user = resolve_basic_user(auth.username, auth.password)
+        if user:
+            return user
+        rate_limit_hit(ip_key)
+        rate_limit_hit(user_key)
     return None
 
 
@@ -329,6 +394,10 @@ VIDEO_RATINGS = {
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+if os.environ.get("K_SERVICE") or os.environ.get("FORCE_HTTPS") == "1":
+    app.config["SESSION_COOKIE_SECURE"] = True
 
 # --- OAuth Initialization ---
 oauth = OAuth(app)
@@ -342,6 +411,11 @@ if AUTH_GOOGLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
         client_kwargs={'scope': 'openid email'}
     )
 
+
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": get_csrf_token()}
+
 # Verify collection access
 if db:
     check_firestore_access(db)
@@ -350,6 +424,12 @@ else:
     print("❌ STARTUP ERROR: Could not connect to Firestore.")
     print("!" * 60)
     sys.exit(1)
+
+@app.after_request
+def add_security_headers(response):
+    if request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # --- Auth Decorator ---
 def check_auth(username, password):
@@ -372,6 +452,9 @@ def requires_auth(f):
             touch_user_activity(user)
             return f(*args, **kwargs)
 
+        if getattr(g, "auth_rate_limited", False):
+            return Response("Too many login attempts. Please try again later.", 429)
+
         if AUTH_GOOGLE and not session.get('prefer_legacy'):
             if not google:
                 return Response("Configuration Error: AUTH_GOOGLE is set but Google Client is not initialized. Check server logs for missing client_secret.json.", 500)
@@ -390,6 +473,16 @@ def requires_admin(f):
         user = current_user()
         if user.get("role") != "admin":
             return Response("Access Denied: Admin privileges required.", 403)
+        return f(*args, **kwargs)
+    return decorated
+
+
+def requires_csrf(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            if not validate_csrf():
+                return Response("CSRF validation failed.", 403)
         return f(*args, **kwargs)
     return decorated
 
@@ -617,6 +710,12 @@ def login_google():
     if not google:
         print("⚠️  Google Login requested but 'google' client is not initialized.")
         return redirect(url_for('index'))
+
+    ip = get_client_ip()
+    ip_key = f"login_google:ip:{ip}"
+    if rate_limit_exceeded(ip_key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS):
+        return Response("Too many login attempts. Please try again later.", 429)
+    rate_limit_hit(ip_key)
     
     # Check if we need to force account selection (if user is already logged in but unauthorized)
     extra_params = {}
@@ -660,8 +759,19 @@ def login_legacy():
     session['prefer_legacy'] = True
     session.pop('user', None)
     auth = request.authorization
+    if auth:
+        ip = get_client_ip()
+        ip_key = f"login:ip:{ip}"
+        user_key = f"login:user:{auth.username}"
+        if rate_limit_exceeded(ip_key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS) or rate_limit_exceeded(
+            user_key, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_SECONDS
+        ):
+            return Response("Too many login attempts. Please try again later.", 429)
     if auth and check_auth(auth.username, auth.password):
         return redirect(url_for('rating_mode'))
+    if auth:
+        rate_limit_hit(ip_key)
+        rate_limit_hit(user_key)
     return authenticate()
 
 @app.route('/logout')
@@ -740,6 +850,7 @@ def rating_mode():
 
 @app.route('/play', methods=['GET', 'POST'])
 @requires_auth
+@requires_csrf
 def playing_mode():
     """
     Presents a random, filtered music video to the user, with editing capabilities.
@@ -932,6 +1043,7 @@ def admin_mode():
             is_admin=is_admin,
             import_requests=import_requests,
             request_submitted=bool(request.args.get("request_submitted")),
+            request_message=request.args.get("request_message"),
             users=users,
             user_message=request.args.get("user_message"),
             inactive_days=inactive_days or "",
@@ -943,6 +1055,7 @@ def admin_mode():
 
 @app.route("/request-import", methods=["POST"])
 @requires_auth
+@requires_csrf
 def request_import():
     """Allow non-admin users to suggest new imports for review."""
     if not db:
@@ -954,7 +1067,50 @@ def request_import():
     notes = (request.form.get("notes") or "").strip()
 
     if request_type not in {"substack", "playlist", "video_ids"} or not payload:
-        return redirect(url_for("admin_mode"))
+        return redirect(url_for("admin_mode", request_message="Invalid import request."))
+
+    if len(payload) > MAX_IMPORT_PAYLOAD_LEN:
+        return redirect(url_for("admin_mode", request_message="Payload too large."))
+
+    if len(notes) > MAX_IMPORT_NOTES_LEN:
+        return redirect(url_for("admin_mode", request_message="Notes too large."))
+
+    ip = get_client_ip()
+    user_key = f"import_request:user:{user.get('id')}"
+    ip_key = f"import_request:ip:{ip}"
+    if rate_limit_exceeded(user_key, IMPORT_REQUEST_RATE_LIMIT, IMPORT_REQUEST_WINDOW_SECONDS) or rate_limit_exceeded(
+        ip_key, IMPORT_REQUEST_RATE_LIMIT, IMPORT_REQUEST_WINDOW_SECONDS
+    ):
+        return redirect(url_for("admin_mode", request_message="Too many import requests. Please try again later."))
+
+    if request_type == "substack":
+        parsed = urlparse(payload)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return redirect(url_for("admin_mode", request_message="Invalid Substack URL."))
+        payload = payload
+    elif request_type == "playlist":
+        playlist_id = normalize_playlist_id(payload)
+        if not playlist_id or len(playlist_id) > 120:
+            return redirect(url_for("admin_mode", request_message="Invalid playlist ID or URL."))
+        payload = playlist_id
+    elif request_type == "video_ids":
+        raw_ids = payload.replace("\n", ",")
+        ids = []
+        for vid in raw_ids.split(","):
+            norm = normalize_video_id(vid)
+            if norm:
+                ids.append(norm)
+        if not ids:
+            return redirect(url_for("admin_mode", request_message="No valid video IDs found."))
+        if len(ids) > MAX_IMPORT_VIDEO_IDS:
+            return redirect(url_for("admin_mode", request_message="Too many video IDs in one request."))
+        for vid in ids:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", vid):
+                return redirect(url_for("admin_mode", request_message="Invalid video ID format."))
+        payload = ", ".join(ids)
+
+    rate_limit_hit(user_key)
+    rate_limit_hit(ip_key)
 
     data = {
         "requested_by": user.get("id"),
@@ -975,6 +1131,7 @@ def request_import():
 @app.route("/admin/import-request/<string:request_id>", methods=["POST"])
 @requires_auth
 @requires_admin
+@requires_csrf
 def update_import_request(request_id):
     """Update status for an import request."""
     if not db:
@@ -1000,6 +1157,7 @@ def update_import_request(request_id):
 @app.route("/admin/users/delete", methods=["POST"])
 @requires_auth
 @requires_admin
+@requires_csrf
 def delete_user():
     """Delete a user and remove their ratings."""
     if not db:
@@ -1027,6 +1185,7 @@ def delete_user():
 @app.route("/admin/users/purge", methods=["POST"])
 @requires_auth
 @requires_admin
+@requires_csrf
 def purge_inactive_users():
     """Delete users inactive for N days and remove their ratings."""
     if not db:
@@ -1062,6 +1221,7 @@ def purge_inactive_users():
     return redirect(url_for("admin_mode", user_message=msg, inactive_days=days))
 @app.route("/skip_video", methods=['POST'])
 @requires_auth
+@requires_csrf
 def skip_video():
     """
     Skips the current video but preserves the filter settings.
@@ -1079,6 +1239,7 @@ def skip_video():
 
 @app.route("/save_rating/<string:video_id>", methods=['POST'])
 @requires_auth
+@requires_csrf
 def save_rating(video_id):
     """
     Saves the user's rating and other attributes to the database.
@@ -1100,6 +1261,7 @@ def save_rating(video_id):
 
 @app.route("/save_play_rating/<string:video_id>", methods=['POST'])
 @requires_auth
+@requires_csrf
 def save_play_rating(video_id):
     """
     Saves ratings from the play mode and redirects back to play mode
@@ -1155,6 +1317,7 @@ def api_youtube_info():
 
 @app.route("/export_playlist", methods=['POST'])
 @requires_auth
+@requires_csrf
 def export_playlist():
     """Exports filtered videos to a YouTube playlist."""
     user = current_user()
@@ -1231,14 +1394,15 @@ def export_playlist():
         
     return redirect(url_for('playing_mode', export_message=msg, **filters))
 
-@app.route("/admin/import-playlist")
+@app.route("/admin/import-playlist", methods=["POST"])
 @requires_auth
 @requires_admin
+@requires_csrf
 def import_playlist():
     """Import videos from a YouTube playlist into Firestore."""
-    raw_playlist = (request.args.get("playlist_id") or "").strip()
+    raw_playlist = (request.form.get("playlist_id") or "").strip()
     playlist_id = normalize_playlist_id(raw_playlist)
-    limit = request.args.get("limit", default=0, type=int)
+    limit = coerce_int(request.form.get("limit"), 0)
 
     def generate():
         if not playlist_id:
@@ -1301,12 +1465,13 @@ def import_playlist():
 
     return Response(stream_with_context(generate()), mimetype="text/plain")
 
-@app.route("/admin/import-video")
+@app.route("/admin/import-video", methods=["POST"])
 @requires_auth
 @requires_admin
+@requires_csrf
 def import_video():
     """Import one or more comma-separated YouTube video IDs into Firestore."""
-    raw_ids = (request.args.get("video_ids") or "").replace("\n", ",")
+    raw_ids = (request.form.get("video_ids") or "").replace("\n", ",")
     ids = []
     for vid in raw_ids.split(","):
         norm = normalize_video_id(vid)
@@ -1359,16 +1524,17 @@ def import_video():
 
     return Response(stream_with_context(generate()), mimetype="text/plain")
 
-@app.route("/admin/run-scraper")
+@app.route("/admin/run-scraper", methods=["POST"])
 @requires_auth
 @requires_admin
+@requires_csrf
 def run_scraper():
     """
     Executes the scrape_to_firestore.py script as a subprocess and streams the output.
     """
-    limit_posts = request.args.get('limit_posts', '0')
-    limit_entries = request.args.get('limit_entries', '10')
-    substack_url = request.args.get('substack_url', 'https://goodmusic.substack.com/archive')
+    limit_posts = request.form.get('limit_posts', '0')
+    limit_entries = request.form.get('limit_entries', '10')
+    substack_url = request.form.get('substack_url', 'https://goodmusic.substack.com/archive')
     
     def generate():
         # Construct the command. 
