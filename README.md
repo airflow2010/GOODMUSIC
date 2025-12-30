@@ -185,7 +185,7 @@ The application uses Firestore as the database. It's free for our usecase (the f
 
 ##### Data model
 
-Each document key is the YouTube `video_id` and stores global metadata like:
+Each document ID is the YouTube `video_id` (it is not stored as a field) and stores global metadata like:
 
 - `title`, `source` (Substack URL), `genre` (AI), `artist`, `track`
 - `ai_model`, `genre_ai_fidelity`, `genre_ai_remarks`

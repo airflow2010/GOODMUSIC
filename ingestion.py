@@ -606,7 +606,6 @@ def ingest_single_video(
     genre, fidelity, remarks, artist, track = prediction
 
     data = {
-        "video_id": video_id,
         "source": source,
         "genre": genre,
         "genre_ai_fidelity": fidelity,

@@ -638,6 +638,7 @@ def get_filtered_videos_list(db, filters, user):
         docs = db.collection(COLLECTION_NAME).stream()
         for doc in docs:
             video_data = doc.to_dict() or {}
+            video_data["video_id"] = doc.id
             rating = extract_user_rating(video_data, user)
             rated_at = rating.get("rated_at")
             rating_music = coerce_int(rating.get("rating_music", 3), 3)
@@ -821,6 +822,7 @@ def rating_mode():
             if not doc.exists:
                 continue
             data = doc.to_dict() or {}
+            data["video_id"] = doc.id
             if genre := data.get("genre"):
                 unique_genres.add(genre)
             rating = extract_user_rating(data, user)
@@ -960,7 +962,7 @@ def admin_mode():
             if rating.get("rejected"):
                 rejected_count += 1
 
-            genre = data.get('genre') or 'Unknown'
+            genre = rating.get("genre_override") or data.get("genre") or "Unknown"
             genre_counts[genre] = genre_counts.get(genre, 0) + 1
 
         def calc_pct(count, total):
