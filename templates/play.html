@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <title>prism | play</title>
     <style>
         .filter-form { display: flex; flex-direction: column; gap: 6px; background-color: #2a2a2a; padding: 12px; border-radius: 4px; margin-bottom: 6px; }
@@ -90,8 +91,31 @@
             </div>
 
             <div id="export-section" style="display: none; background-color: #333; padding: 15px; margin-top: 10px; border-radius: 4px; border: 1px solid #555;">
-                <!-- Content loaded via JS -->
-                <p>Loading YouTube info...</p>
+                <h4 style="margin-top:0;">Export to YouTube Playlist</h4>
+                <p id="export-account" style="font-size: 0.9em;">Not connected.</p>
+                {% if not google_client_id %}
+                    <p style="color: #ff6b6b; font-size: 0.9em;">YouTube export is disabled because GOOGLE_CLIENT_ID is not configured.</p>
+                {% endif %}
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="button" id="yt-connect-btn" class="save-button" {% if not google_client_id %}disabled{% endif %}>Connect YouTube</button>
+                </div>
+                <div id="export-controls" class="is-hidden" style="margin-top: 12px;">
+                    <div style="margin-bottom: 10px;">
+                        <label>Select Playlist:</label>
+                        <select id="export_playlist_id" style="width: 100%;">
+                            <option value="">-- Create New Playlist --</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label>Or New Playlist Name:</label>
+                        <input type="text" id="new_playlist_name" placeholder="My New Playlist">
+                    </div>
+                    <button type="button" id="yt-export-btn" class="save-button" disabled>Start Export</button>
+                </div>
+                <div id="export-status" style="margin-top: 8px; font-size: 0.9em;"></div>
+                <p style="font-size: 0.8em; color: #aaa; margin-top: 8px;">
+                    Exports all {{ videos_count }} filtered videos. Keep this tab open during export.
+                </p>
             </div>
         </div>
     </form>
@@ -299,89 +323,326 @@
         const sec = document.getElementById('export-section');
         if (sec.style.display === 'none') {
             sec.style.display = 'block';
-            loadYoutubeInfo();
+            loadYouTubeInfo(false);
         } else {
             sec.style.display = 'none';
         }
     }
 
-    function loadYoutubeInfo() {
-        fetch('/api/youtube_info')
-            .then(response => response.json())
-            .then(data => {
-                const sec = document.getElementById('export-section');
-                if (data.error) {
-                    sec.innerHTML = `<p style="color: #ff6b6b;">${data.error}</p>`;
+    const YT_CLIENT_ID = '{{ google_client_id or "" }}';
+    const YT_SCOPES = 'https://www.googleapis.com/auth/youtube';
+    let ytTokenClient = null;
+    let ytAccessToken = null;
+    let ytTokenExpiry = 0;
+    let ytExportInProgress = false;
+
+    function setExportStatus(message, isError = false) {
+        const el = document.getElementById('export-status');
+        if (!el) return;
+        el.textContent = message || '';
+        el.style.color = isError ? '#ff6b6b' : '#cfd8dc';
+    }
+
+    function setExportAccount(message, isError = false) {
+        const el = document.getElementById('export-account');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = isError ? '#ff6b6b' : '#cfd8dc';
+    }
+
+    function formatYouTubeError(err) {
+        const message = err && err.message ? err.message : String(err || 'Unknown error');
+        const normalized = message.toLowerCase();
+        if (normalized.includes('channel not found') || normalized.includes('channelnotfound')) {
+            return 'This Google account does not have a YouTube channel yet. Visit youtube.com to create one, then reconnect.';
+        }
+        return message;
+    }
+
+    function waitForGoogleOAuth(timeoutMs = 5000) {
+        return new Promise((resolve, reject) => {
+            const start = Date.now();
+            (function check() {
+                if (window.google && google.accounts && google.accounts.oauth2) {
+                    resolve();
                     return;
                 }
-                let html = `<h4 style="margin-top:0;">Export to YouTube Playlist</h4>`;
-                html += `<p style="font-size:0.9em;">Connected Account: <strong>${data.channel}</strong></p>`;
-                html += `<div style="margin-bottom: 10px;">
-                            <label>Select Playlist:</label>
-                            <select id="export_playlist_id" style="width: 100%;">
-                                <option value="">-- Create New Playlist --</option>`;
-                data.playlists.forEach(pl => {
-                    html += `<option value="${pl.id}">${pl.title}</option>`;
-                });
-                html += `   </select>
-                         </div>`;
-                html += `<div style="margin-bottom: 10px;">
-                            <label>Or New Playlist Name:</label>
-                            <input type="text" id="new_playlist_name" placeholder="My New Playlist">
-                         </div>`;
-                html += `<p style="font-size: 0.8em; color: #aaa;">Exports all ${ {{ videos_count }} } filtered videos. Duplicates in the target playlist will be skipped.</p>`;
-                html += `<button type="button" onclick="submitExport()" class="save-button">Start Export</button>`;
-                
-                sec.innerHTML = html;
-            });
+                if (Date.now() - start > timeoutMs) {
+                    reject(new Error('Google OAuth client failed to load.'));
+                    return;
+                }
+                setTimeout(check, 100);
+            })();
+        });
     }
 
-    function submitExport() {
-        const mainForm = document.getElementById('playing-form');
-        const exportForm = document.createElement('form');
-        exportForm.method = 'POST';
-        exportForm.action = '{{ url_for("export_playlist") }}';
+    function initYouTubeTokenClient() {
+        if (ytTokenClient || !YT_CLIENT_ID) return;
+        ytTokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: YT_CLIENT_ID,
+            scope: YT_SCOPES,
+            callback: () => {},
+            include_granted_scopes: false
+        });
+    }
 
-        const csrfHidden = document.createElement('input');
-        csrfHidden.type = 'hidden';
-        csrfHidden.name = 'csrf_token';
-        csrfHidden.value = '{{ csrf_token }}';
-        exportForm.appendChild(csrfHidden);
-        
-        // Copy main filter inputs
-        const inputs = ['min_rating_music', 'min_rating_video', 'genre_filter', 'favorite_only', 'include_unrated', 'exclude_rejected'];
-        inputs.forEach(name => {
-            const el = mainForm.elements[name];
-            const hidden = document.createElement('input');
-            hidden.type = 'hidden';
-            hidden.name = name;
-            if (el.type === 'checkbox') {
-                if (el.checked) exportForm.appendChild(hidden);
-            } else {
-                hidden.value = el.value;
-                exportForm.appendChild(hidden);
+    function tokenIsValid() {
+        return ytAccessToken && Date.now() < ytTokenExpiry - 60000;
+    }
+
+    async function ensureYouTubeToken(interactive) {
+        if (!YT_CLIENT_ID) {
+            throw new Error('Google OAuth client is not configured.');
+        }
+        await waitForGoogleOAuth();
+        initYouTubeTokenClient();
+        if (!ytTokenClient) {
+            throw new Error('Google OAuth client could not be initialized.');
+        }
+        if (tokenIsValid()) {
+            return ytAccessToken;
+        }
+        return new Promise((resolve, reject) => {
+            ytTokenClient.callback = (resp) => {
+                if (resp && resp.access_token) {
+                    ytAccessToken = resp.access_token;
+                    ytTokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+                    resolve(ytAccessToken);
+                } else {
+                    reject(new Error(resp && resp.error ? resp.error : 'Token request failed.'));
+                }
+            };
+            ytTokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+        });
+    }
+
+    async function ytRequest(path, params = {}, method = 'GET', body = null) {
+        const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`);
+        Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '') {
+                url.searchParams.set(key, value);
             }
         });
-        
-        // Add export specific inputs
-        const plSelect = document.getElementById('export_playlist_id');
-        const newPlInput = document.getElementById('new_playlist_name');
-        
-        const plHidden = document.createElement('input');
-        plHidden.type = 'hidden';
-        plHidden.name = 'playlist_id';
-        plHidden.value = plSelect.value;
-        exportForm.appendChild(plHidden);
-        
-        const newPlHidden = document.createElement('input');
-        newPlHidden.type = 'hidden';
-        newPlHidden.name = 'new_playlist_name';
-        newPlHidden.value = newPlInput.value;
-        exportForm.appendChild(newPlHidden);
-        
-        document.body.appendChild(exportForm);
-        exportForm.submit();
+        const options = {
+            method: method,
+            headers: {
+                'Authorization': `Bearer ${ytAccessToken}`,
+                'Accept': 'application/json'
+            }
+        };
+        if (body) {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        }
+        const resp = await fetch(url.toString(), options);
+        const text = await resp.text();
+        let data = {};
+        if (text) {
+            try {
+                data = JSON.parse(text);
+            } catch {
+                data = { error: { message: text } };
+            }
+        }
+        if (!resp.ok) {
+            const message = data && data.error && data.error.message ? data.error.message : text || `HTTP ${resp.status}`;
+            throw new Error(message);
+        }
+        return data;
     }
+
+    async function loadYouTubeInfo(interactive) {
+        const controls = document.getElementById('export-controls');
+        const exportBtn = document.getElementById('yt-export-btn');
+        const select = document.getElementById('export_playlist_id');
+
+        if (!YT_CLIENT_ID) {
+            setExportAccount('YouTube export is not configured.');
+            return;
+        }
+
+        setExportStatus('');
+        if (controls) controls.classList.add('is-hidden');
+        if (exportBtn) exportBtn.disabled = true;
+
+        try {
+            if (!interactive && !tokenIsValid()) {
+                setExportAccount('Not connected.');
+                setExportStatus('Click "Connect YouTube" to authorize.');
+                return;
+            }
+
+            setExportAccount('Connecting to YouTube...');
+            await ensureYouTubeToken(interactive);
+
+            const channelData = await ytRequest('channels', { part: 'snippet', mine: 'true' });
+            const channelTitle = channelData.items && channelData.items[0] && channelData.items[0].snippet
+                ? channelData.items[0].snippet.title
+                : 'Unknown';
+            setExportAccount(`Connected account: ${channelTitle}`);
+
+            const playlists = [];
+            let pageToken = '';
+            do {
+                const data = await ytRequest('playlists', {
+                    part: 'snippet',
+                    mine: 'true',
+                    maxResults: '50',
+                    pageToken: pageToken
+                });
+                (data.items || []).forEach(item => playlists.push(item));
+                pageToken = data.nextPageToken || '';
+            } while (pageToken);
+
+            if (select) {
+                select.innerHTML = '';
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = '';
+                defaultOpt.textContent = '-- Create New Playlist --';
+                select.appendChild(defaultOpt);
+                playlists.forEach(pl => {
+                    const opt = document.createElement('option');
+                    opt.value = pl.id;
+                    opt.textContent = (pl.snippet && pl.snippet.title) ? pl.snippet.title : pl.id;
+                    select.appendChild(opt);
+                });
+            }
+
+            if (controls) controls.classList.remove('is-hidden');
+            if (exportBtn) exportBtn.disabled = false;
+        } catch (err) {
+            const friendly = formatYouTubeError(err);
+            if (friendly.startsWith('This Google account does not have a YouTube channel')) {
+                setExportAccount('YouTube channel missing.', true);
+                setExportStatus(friendly, true);
+            } else {
+                setExportAccount('Not connected.');
+                setExportStatus(`YouTube connection required: ${friendly}`, true);
+            }
+        }
+    }
+
+    async function connectYouTube() {
+        await loadYouTubeInfo(true);
+    }
+
+    function getFilteredVideoIds() {
+        const select = document.getElementById('selected_video_id');
+        if (!select) return [];
+        const ids = [];
+        for (const option of select.options) {
+            if (option.value) {
+                ids.push(option.value);
+            }
+        }
+        return Array.from(new Set(ids));
+    }
+
+    async function exportToYouTube() {
+        if (ytExportInProgress) return;
+        const exportBtn = document.getElementById('yt-export-btn');
+        const select = document.getElementById('export_playlist_id');
+        const newNameInput = document.getElementById('new_playlist_name');
+        const videoIds = getFilteredVideoIds();
+
+        if (!videoIds.length) {
+            setExportStatus('No videos to export for the current filter.', true);
+            return;
+        }
+
+        ytExportInProgress = true;
+        if (exportBtn) exportBtn.disabled = true;
+        setExportStatus(`Preparing export of ${videoIds.length} videos...`);
+
+        try {
+            await ensureYouTubeToken(true);
+
+            const newName = newNameInput ? newNameInput.value.trim() : '';
+            let playlistId = select ? select.value : '';
+            if (newName) {
+                const created = await ytRequest(
+                    'playlists',
+                    { part: 'snippet,status' },
+                    'POST',
+                    { snippet: { title: newName }, status: { privacyStatus: 'private' } }
+                );
+                playlistId = created.id;
+            } else if (!playlistId) {
+                throw new Error('Select a playlist or enter a new playlist name.');
+            }
+
+            const existingIds = new Set();
+            if (!newName) {
+                let pageToken = '';
+                do {
+                    const data = await ytRequest('playlistItems', {
+                        part: 'snippet',
+                        playlistId: playlistId,
+                        maxResults: '50',
+                        pageToken: pageToken
+                    });
+                    (data.items || []).forEach(item => {
+                        const vid = item.snippet && item.snippet.resourceId ? item.snippet.resourceId.videoId : null;
+                        if (vid) existingIds.add(vid);
+                    });
+                    pageToken = data.nextPageToken || '';
+                } while (pageToken);
+            }
+
+            let added = 0;
+            let skipped = 0;
+            let failed = 0;
+
+            for (let i = 0; i < videoIds.length; i += 1) {
+                const vid = videoIds[i];
+                if (existingIds.has(vid)) {
+                    skipped += 1;
+                } else {
+                    try {
+                        await ytRequest(
+                            'playlistItems',
+                            { part: 'snippet' },
+                            'POST',
+                            { snippet: { playlistId: playlistId, resourceId: { kind: 'youtube#video', videoId: vid } } }
+                        );
+                        added += 1;
+                        existingIds.add(vid);
+                    } catch (err) {
+                        failed += 1;
+                    }
+                }
+
+                if ((i + 1) % 5 === 0 || i + 1 === videoIds.length) {
+                    setExportStatus(`Exporting... ${i + 1}/${videoIds.length} | added: ${added}, skipped: ${skipped}, failed: ${failed}`);
+                }
+            }
+
+            setExportStatus(`Done. Added: ${added}, skipped: ${skipped}, failed: ${failed}.`);
+        } catch (err) {
+            const friendly = formatYouTubeError(err);
+            setExportStatus(`Export failed: ${friendly}`, true);
+        } finally {
+            ytExportInProgress = false;
+            if (exportBtn) exportBtn.disabled = false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const connectBtn = document.getElementById('yt-connect-btn');
+        if (connectBtn) {
+            connectBtn.addEventListener('click', function() {
+                connectYouTube().catch(err => {
+                    setExportStatus(`YouTube connection failed: ${err.message}`, true);
+                });
+            });
+        }
+        const exportBtn = document.getElementById('yt-export-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', function() {
+                exportToYouTube();
+            });
+        }
+    });
 </script>
 
 </body>

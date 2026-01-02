@@ -924,7 +924,19 @@ def playing_mode():
 
     export_message = request.args.get('export_message')
 
-    return render_template('play.html', video=video, genres=sorted_genres, filters=current_filters, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_count=videos_count, playlist=filtered_videos, export_message=export_message, index_error=index_error)
+    return render_template(
+        'play.html',
+        video=video,
+        genres=sorted_genres,
+        filters=current_filters,
+        music_ratings=MUSIC_RATINGS,
+        video_ratings=VIDEO_RATINGS,
+        videos_count=videos_count,
+        playlist=filtered_videos,
+        export_message=export_message,
+        index_error=index_error,
+        google_client_id=GOOGLE_CLIENT_ID,
+    )
 
 @app.route("/admin")
 @requires_auth
@@ -1293,6 +1305,7 @@ def save_play_rating(video_id):
 
 @app.route("/api/youtube_info")
 @requires_auth
+@requires_admin
 def api_youtube_info():
     """Returns the connected YouTube channel and list of playlists."""
     yt = ingestion_get_youtube_service()
@@ -1319,6 +1332,7 @@ def api_youtube_info():
 
 @app.route("/export_playlist", methods=['POST'])
 @requires_auth
+@requires_admin
 @requires_csrf
 def export_playlist():
     """Exports filtered videos to a YouTube playlist."""

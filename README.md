@@ -79,7 +79,7 @@ Due to the nature of this project several configuration steps are needed. Here i
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
 | AUTH_GOOGLE          | admin email (enables Google login; additional users via users collection) | .env | Secret Manager |
 | `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | Secret Manager |
-| `token.pickle`       | file which contains user credentials (access token and refresh token) which are used against the YouTube API | project-root | Secret Manager |
+| `token.pickle`       | file which contains user credentials (access token and refresh token) used by server-side YouTube API calls (ingestion/import) | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
 | FLASK_SECRET_KEY     | env-var with a random, stable value used to sign sessions    | .env         | Secret Manager |
 
@@ -99,12 +99,16 @@ You must create credentials for our app to authenticate against the YouTube API:
       // Needed for OAuth Login for the web-app (running in the cloud)
 5. Download the JSON file, rename it to `client_secret.json`, and place it in the project root.
 
-Regarding token.pickle, this files contains our credentials to authenticate our individual user (not the app) against the YouTube API. It will be created during the first call of functions which call this API - like scraping and importing new videos, or like exporting playlists to YouTube. In this case, a browser windows will pop up and you have to acknowledge access of our app to your YouTube-account.
+6. Set **Authorised JavaScript origins** (needed for browser-based playlist export):
+   1. http://localhost:8080
+   2. https://<YOUR-CLOUD-RUN-URL>
+
+Regarding token.pickle, this file contains our credentials to authenticate our individual user (not the app) against the YouTube API. It is created during the first call of server-side functions which call this API - like scraping and importing new videos. A browser window will pop up and you have to acknowledge access of our app to your YouTube-account.
 
 1. In the running app, import new videos in the "admin"-section.
 2. A browser windows will pop up and ask for confirmation of access to your YouTube account.
 3. Acknowledge and `token.pickle` will be created.
-4. The token.pickle will then be automatically uploaded into the cloud into the Secret Manager, so next time you'll run the application from cloud it will be available there and you can use all functions that need YouTube API access (ingestion, playlist import/export) there
+4. The token.pickle will then be automatically uploaded into the cloud into the Secret Manager, so next time you'll run the application from cloud it will be available there and you can use all functions that need server-side YouTube API access (ingestion, playlist import) there
 
 Firestore database is somewhat limited in queries which it can directly fulfill. For cases where we need more complex queries, it is needed to (auto) populate an index query. This only has to be done once.
 
@@ -218,7 +222,10 @@ python migrate_ratings.py --add-rand
 
 We pull metadata from the YouTube API, which is why you have to enable it as well (search for it in [Google Cloud Console](https://console.cloud.google.com/) and enable it).
 
-Usage of this API is free, but note that you might run into quota limits of the API. This is especially true for playlist export, which consumes a lot of quota. In this case, you have to run the export several times over the course of several days. The application will continue export of playlists where it left.
+Usage of this API is free, but note that you might run into quota limits of the API. This is especially true for playlist export, which consumes a lot of quota. In this case, you can re-run the export later; duplicates are skipped automatically.
+
+Playlist export runs in the browser using OAuth for the currently logged-in user. Tokens are not stored server-side; keep the tab open while the export is running.
+If the OAuth consent screen is in testing mode, add your users as test users (or publish the app) so they can authorize YouTube access.
 
 #### Google Cloud Run
 
