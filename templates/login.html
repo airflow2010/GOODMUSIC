@@ -5,98 +5,58 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>prism | login</title>
-    <style>
-        .login-content {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 40px 20px;
-            text-align: center;
-        }
-        .app-desc {
-            font-size: 1.5em;
-            margin: 20px 0 40px;
-            color: #e0e0e0;
-        }
-        .login-options {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            width: 100%;
-            max-width: 300px;
-        }
-        .login-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 12px;
-            border-radius: 4px;
-            text-decoration: none;
-            font-size: 1.1em;
-            font-weight: 500;
-            transition: opacity 0.2s;
-            border: none;
-            cursor: pointer;
-            color: white;
-        }
-        .login-btn:hover {
-            opacity: 0.9;
-            text-decoration: none;
-        }
-        .btn-google {
-            background-color: #4285F4;
-        }
-        .btn-legacy {
-            background-color: #555;
-        }
-        .footer-links {
-            margin-top: 60px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            font-size: 0.9em;
-        }
-        .footer-links a {
-            color: #666;
-        }
-        .footer-links a:hover {
-            color: #888;
-        }
-    </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="login-content">
-        <div class="logo-wrap" style="margin-bottom: 10px;">
-            <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
-        </div>
-        
-        <div class="app-desc">Create your own MTV! 🎶</div>
+<div class="container login-container">
+    <div class="logo-wrap login-logo-wrap">
+        <img class="logo login-logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Prism logo">
+    </div>
 
-        {% if unauthorized_email %}
-        <div style="color: #ff6b6b; margin-bottom: 20px; background-color: rgba(255, 107, 107, 0.1); padding: 10px; border-radius: 4px; border: 1px solid #ff6b6b;">
-            User <strong>{{ unauthorized_email }}</strong> is disabled.
+    <h1 class="login-title">Create your own MTV! <span aria-hidden="true">🎶</span></h1>
+
+    <div class="login-features">
+        <div class="login-card">
+            <div class="login-card-header">
+                <span class="login-card-icon" aria-hidden="true">⭐</span>
+                <h3>Rate</h3>
+            </div>
+            <p>Discover and score your favorite music videos.</p>
         </div>
+
+        <div class="login-card">
+            <div class="login-card-header">
+                <span class="login-card-icon" aria-hidden="true">🎚</span>
+                <h3>Filter</h3>
+            </div>
+            <p>Mix by genre or rating to build your perfect stream.</p>
+        </div>
+
+        <div class="login-card">
+            <div class="login-card-header">
+                <span class="login-card-icon" aria-hidden="true">▶</span>
+                <h3>Export</h3>
+            </div>
+            <p>Take your playlists home to YouTube.</p>
+        </div>
+    </div>
+
+    {% if unauthorized_email %}
+    <div class="index-error login-notice">
+        User <strong>{{ unauthorized_email }}</strong> is disabled.
+    </div>
+    {% endif %}
+
+    <div class="login-actions">
+        {% if google_enabled %}
+        <a href="{{ url_for('login_google') }}" class="login-btn">Continue with Google</a>
         {% endif %}
+    </div>
 
-        <div class="login-options">
-            {% if google_enabled %}
-            <a href="{{ url_for('login_google') }}" class="login-btn btn-google">
-                Login with Google
-            </a>
-            {% endif %}
-            <a href="{{ url_for('login_legacy') }}" class="login-btn btn-legacy">
-                Legacy Login
-            </a>
-        </div>
-
-        <div class="footer-links">
-            <a href="{{ url_for('privacy') }}">Privacy Policy</a>
-            <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank">
-                Code & Documentation
-            </a>            
-        </div>
+    <div class="login-footer">
+        <a href="{{ url_for('privacy') }}">Privacy Policy</a>
+        <span class="footer-divider">&middot;</span>
+        <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank">Code &amp; Docs</a>
     </div>
 </div>
 
