@@ -784,6 +784,10 @@ def logout():
 def privacy():
     return render_template('privacy.html', current_date=datetime.now().strftime("%Y-%m-%d"))
 
+@app.route('/tos')
+def tos():
+    return render_template('tos.html', current_date=datetime.now().strftime("%Y-%m-%d"))
+
 @app.route("/")
 def index():
     """

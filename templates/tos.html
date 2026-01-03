@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>prism | terms</title>
+    <style>
+        .policy-content {
+            line-height: 1.6;
+            color: #ccc;
+        }
+        .policy-content h3 {
+            color: #fff;
+            margin-top: 25px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        .policy-content ul {
+            list-style-type: disc;
+            margin-left: 20px;
+        }
+        .policy-content li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="logo-wrap">
+        <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="PRISM Logo">
+    </div>
+
+    <h1>Terms of Service</h1>
+    <p style="color: #888; font-size: 0.9em;">Last updated: {{ current_date }}</p>
+
+    <div class="policy-content">
+        <h3>1. Acceptance of Terms</h3>
+        <p>By accessing or using PRISM ("we", "our", or "the App"), you agree to these Terms of Service. If you do not agree, do not use the App.</p>
+
+        <h3>2. Access and Accounts</h3>
+        <p>Access to the App may be limited to approved users. You are responsible for maintaining the confidentiality of your login credentials and for all activity under your account.</p>
+
+        <h3>3. Acceptable Use</h3>
+        <ul>
+            <li>Use the App only for its intended purpose of music video curation and rating.</li>
+            <li>Do not attempt to disrupt, overload, or reverse engineer the App or its services.</li>
+            <li>Do not upload or export content that you do not have the right to use.</li>
+        </ul>
+
+        <h3>4. YouTube API Services</h3>
+        <p>The App uses YouTube API Services. By using the App, you agree to the <a href="https://www.youtube.com/t/terms" target="_blank">YouTube Terms of Service</a> and acknowledge the <a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a>.</p>
+
+        <h3>5. Your Content and Data</h3>
+        <p>You retain ownership of your content. By using the App, you grant us permission to process your data only as needed to provide the App's features (for example, importing or exporting playlists). See the <a href="{{ url_for('privacy') }}">Privacy Policy</a> for details on how data is handled.</p>
+
+        <h3>6. Availability and Changes</h3>
+        <p>The App is provided on an "as is" and "as available" basis. We may modify, suspend, or discontinue features at any time without notice.</p>
+
+        <h3>7. Disclaimers and Limitation of Liability</h3>
+        <p>To the maximum extent permitted by law, we disclaim all warranties and will not be liable for any indirect, incidental, or consequential damages arising from your use of the App.</p>
+
+        <h3>8. Termination</h3>
+        <p>We may revoke access to the App at any time. You may stop using the App and revoke Google access in your <a href="https://myaccount.google.com/permissions" target="_blank">Google Security Settings</a>.</p>
+
+        <h3>9. Changes to These Terms</h3>
+        <p>We may update these Terms from time to time. Your continued use of the App after changes become effective constitutes acceptance of the updated Terms.</p>
+
+        <h3>10. Contact</h3>
+        <p>If you have questions about these Terms, please contact the repository maintainer via <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank">GitHub</a>.</p>
+    </div>
+
+    <div style="margin-top: 40px; text-align: center;">
+        <a href="{{ url_for('index') }}" class="button-link next-button">Back to App</a>
+    </div>
+</div>
+
+</body>
+</html>
