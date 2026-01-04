@@ -5,53 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>prism | admin</title>
-    <style>
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #333; }
-        th { background-color: #2a2a2a; }
-        tr:hover { background-color: #2a2a2a; }
-        .stat-card { background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 10px; }
-        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-        .admin-btn {
-            height: 44px;
-            min-height: 44px;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            padding: 0 18px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            line-height: 1;
-            box-sizing: border-box;
-        }
-        .admin-btn-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .admin-btn-row--end {
-            justify-content: flex-end;
-        }
-
-        .admin-btn-row--spaced {
-            margin-top: 10px;
-        }
-        .account-session-card { padding: 18px; }
-        .account-session-row { display: flex; align-items: center; gap: 12px; }
-        .account-session-icon { width: 36px; height: 36px; color: #888; flex: 0 0 auto; }
-        .account-session-details { display: flex; flex-direction: column; }
-        .account-session-identifier { font-weight: 600; }
-        .account-session-status { font-size: 0.85em; color: #888; }
-        .account-session-divider { height: 1px; background-color: #333; margin: 12px 0; }
-        .account-session-message { margin-bottom: 10px; color: #ffcc00; }
-    </style>
 </head>
 <body>
 
 <div class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <div class="logo-wrap" style="margin-bottom: 0;">
+    <div class="page-header">
+        <div class="logo-wrap logo-wrap--compact">
             <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
         </div>
         <select onchange="window.location.href=this.value" class="nav-select">
@@ -62,12 +21,12 @@
     </div>
     
     {% if request_submitted %}
-    <div class="stat-card" style="border-left: 4px solid #4caf50;">
+    <div class="stat-card stat-card--success">
         ✅ Request submitted. The admin will review it.
     </div>
     {% endif %}
     {% if request_message %}
-    <div class="stat-card" style="border-left: 4px solid #ffcc00;">
+    <div class="stat-card stat-card--warning">
         {{ request_message }}
     </div>
     {% endif %}
@@ -79,21 +38,21 @@
             <span>{{ stats.total_entries }}</span>
         </div>
         <div class="stat-row">
-            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; position: relative; top: -3px;"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Rated Entries:</strong>
+            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="stat-icon"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Rated Entries:</strong>
             <span>{{ stats.rated_count }} ({{ stats.rated_pct }}%)</span>
         </div>
         <div class="stat-row">
-            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; position: relative; top: -3px;"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Favorites:</strong>
+            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="stat-icon"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Favorites:</strong>
             <span>{{ stats.favorite_count }} ({{ stats.favorite_pct }}%)</span>
         </div>
         <div class="stat-row">
-            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; position: relative; top: -3px;"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Rejected:</strong>
+            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="stat-icon"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Rejected:</strong>
             <span>{{ stats.rejected_count }} ({{ stats.rejected_pct }}%)</span>
         </div>
     </div>
 
     <h2>Genre Statistics</h2>
-    <table>
+    <table class="data-table">
         <thead>
             <tr>
                 <th>Genre</th>
@@ -112,12 +71,12 @@
         </tbody>
     </table>
 
-    <h2 style="margin-top: 40px;">Video Import</h2>
+    <h2 class="section-heading">Video Import</h2>
     <div class="stat-card">
         {% if is_admin %}
             {% if import_requests %}
             <h3>Pending Import Requests</h3>
-            <table>
+            <table class="data-table">
                 <thead>
                     <tr>
                         <th>Type</th>
@@ -131,14 +90,14 @@
                     {% for req in import_requests %}
                     <tr>
                         <td>{{ req.request_type }}</td>
-                        <td style="max-width: 400px; word-break: break-word;">{{ req.payload }}</td>
+                        <td class="data-table-cell-wrap">{{ req.payload }}</td>
                         <td>{{ req.requested_by }}</td>
                         <td>{{ req.status }}</td>
                         <td>
-                            <form action="{{ url_for('update_import_request', request_id=req.id) }}" method="post" style="display: flex; gap: 6px;">
+                            <form action="{{ url_for('update_import_request', request_id=req.id) }}" method="post" class="admin-btn-row admin-btn-row--tight">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <button type="submit" name="status" value="imported" class="next-button admin-btn" style="width: auto;">Mark Imported</button>
-                                <button type="submit" name="status" value="rejected" class="next-button admin-btn" style="width: auto; background-color: #d32f2f;">Reject</button>
+                                <button type="submit" name="status" value="imported" class="next-button admin-btn button-compact">Mark Imported</button>
+                                <button type="submit" name="status" value="rejected" class="next-button admin-btn button-compact button-danger">Reject</button>
                             </form>
                         </td>
                     </tr>
@@ -146,103 +105,103 @@
                 </tbody>
             </table>
             {% else %}
-            <p style="color: #aaa; margin: 0;">No pending import requests.</p>
+            <p class="empty-state">No pending import requests.</p>
             {% endif %}
 
             {% if import_restricted %}
             <h3>from Substack or YouTube playlists/IDs</h3>
-            <div style="background-color: #3e3e3e; border-left: 5px solid #ffcc00; padding: 15px; margin-top: 10px;">
-                <strong style="color: #ffcc00;">Functionality Restricted</strong>
-                <p style="margin-top: 10px; margin-bottom: 0;">
+            <div class="admin-callout">
+                <strong class="admin-callout-title">Functionality Restricted</strong>
+                <p>
                     Importing videos is currently disabled because this instance is running in the cloud and no <code>cookies.txt</code> file was found. 
                     YouTube blocks automated requests from cloud IP addresses.
                 </p>
-                <p style="margin-top: 10px; margin-bottom: 0;">
+                <p>
                     To enable this feature, please run the application locally or deploy a valid <code>cookies.txt</code> file.
                 </p>
             </div>
             {% else %}
             <h3>from Substack</h3>
-            <form id="scraper-form" style="display: flex; flex-direction: column; gap: 10px;">
+            <form id="scraper-form" class="admin-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div style="display: flex; align-items: center;">
-                    <label for="limit_posts" style="width: 280px; font-size: 0.9em;">--limit-substack-posts (0 for all)</label>
-                    <input type="text" id="limit_posts" name="limit_posts" value="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+                <div class="admin-form-row">
+                    <label for="limit_posts" class="admin-form-label admin-form-label--wide">--limit-substack-posts (0 for all)</label>
+                    <input type="text" id="limit_posts" name="limit_posts" value="0" class="admin-field admin-field--xs">
                 </div>
-                <div style="display: flex; align-items: center;">
-                    <label for="limit_entries" style="width: 280px; font-size: 0.9em;">--limit-new-db-entries (0 for all)</label>
-                    <input type="text" id="limit_entries" name="limit_entries" value="10" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
+                <div class="admin-form-row">
+                    <label for="limit_entries" class="admin-form-label admin-form-label--wide">--limit-new-db-entries (0 for all)</label>
+                    <input type="text" id="limit_entries" name="limit_entries" value="10" class="admin-field admin-field--xs">
                 </div>
-                <div style="display: flex; align-items: center;">
-                     <label for="substack_url" style="width: 280px; font-size: 0.9em;">--substack</label>
-                     <input type="text" id="substack_url" name="substack_url" value="https://goodmusic.substack.com/archive" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
+                <div class="admin-form-row">
+                     <label for="substack_url" class="admin-form-label admin-form-label--wide">--substack</label>
+                     <input type="text" id="substack_url" name="substack_url" value="https://goodmusic.substack.com/archive" class="admin-field admin-field--half">
                 </div>
                 <div class="admin-btn-row admin-btn-row--spaced">
-                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Import</button>
+                    <button type="submit" class="next-button admin-btn button-accent">Import</button>
                 </div>
             </form>
-            
-            <pre id="scraper-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 300px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
 
-            <h3 style="margin-top: 20px;">from YouTube playlist</h3>
-            <form id="playlist-form" style="display: flex; flex-direction: column; gap: 10px;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div style="display: flex; align-items: center;">
-                    <label for="playlist_id" style="width: 280px; font-size: 0.9em;">Playlist ID (or full URL)</label>
-                    <input type="text" id="playlist_id" name="playlist_id" placeholder="PLxxxx" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
-                </div>
-                <div style="display: flex; align-items: center;">
-                    <label for="playlist_limit" style="width: 280px; font-size: 0.9em;">Limit (0 for all)</label>
-                    <input type="number" id="playlist_limit" name="playlist_limit" value="0" min="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
-                </div>
-                <div class="admin-btn-row admin-btn-row--spaced">
-                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Import</button>
-                </div>
-            </form>
-            <pre id="playlist-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 220px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+            <pre id="scraper-output" class="admin-output admin-output--tall"></pre>
 
-            <h3 style="margin-top: 20px;">from YouTube ID</h3>
-            <form id="single-video-form" style="display: flex; flex-direction: column; gap: 10px;">
+            <h3 class="section-subheading">from YouTube playlist</h3>
+            <form id="playlist-form" class="admin-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div style="display: flex; align-items: center;">
-                    <label for="video_ids" style="width: 280px; font-size: 0.9em;">Video IDs (comma or newline separated)</label>
-                    <input type="text" id="video_ids" name="video_ids" placeholder="abc123, def456" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
+                <div class="admin-form-row">
+                    <label for="playlist_id" class="admin-form-label admin-form-label--wide">Playlist ID (or full URL)</label>
+                    <input type="text" id="playlist_id" name="playlist_id" placeholder="PLxxxx" class="admin-field admin-field--half">
+                </div>
+                <div class="admin-form-row">
+                    <label for="playlist_limit" class="admin-form-label admin-form-label--wide">Limit (0 for all)</label>
+                    <input type="number" id="playlist_limit" name="playlist_limit" value="0" min="0" class="admin-field admin-field--xs">
                 </div>
                 <div class="admin-btn-row admin-btn-row--spaced">
-                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Import</button>
+                    <button type="submit" class="next-button admin-btn button-accent">Import</button>
                 </div>
             </form>
-            <pre id="single-video-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 180px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+            <pre id="playlist-output" class="admin-output admin-output--medium"></pre>
+
+            <h3 class="section-subheading">from YouTube ID</h3>
+            <form id="single-video-form" class="admin-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="admin-form-row">
+                    <label for="video_ids" class="admin-form-label admin-form-label--wide">Video IDs (comma or newline separated)</label>
+                    <input type="text" id="video_ids" name="video_ids" placeholder="abc123, def456" class="admin-field admin-field--half">
+                </div>
+                <div class="admin-btn-row admin-btn-row--spaced">
+                    <button type="submit" class="next-button admin-btn button-accent">Import</button>
+                </div>
+            </form>
+            <pre id="single-video-output" class="admin-output admin-output--short"></pre>
             {% endif %}
         {% else %}
             <h3>Suggest an Import</h3>
-            <p style="margin-bottom: 15px; color: #999;">Requests are reviewed by the admin before importing.</p>
-            <form action="{{ url_for('request_import') }}" method="post" style="display: flex; flex-direction: column; gap: 10px;">
+            <p class="helper-text">Requests are reviewed by the admin before importing.</p>
+            <form action="{{ url_for('request_import') }}" method="post" class="admin-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div style="display: flex; align-items: center;">
-                    <label for="request_type" style="width: 180px; font-size: 0.9em;">Type</label>
-                    <select id="request_type" name="request_type" required style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 220px;">
+                <div class="admin-form-row">
+                    <label for="request_type" class="admin-form-label admin-form-label--medium">Type</label>
+                    <select id="request_type" name="request_type" required class="admin-field admin-field--md">
                         <option value="substack">Substack URL</option>
                         <option value="playlist">YouTube Playlist</option>
                         <option value="video_ids">YouTube Video IDs</option>
                     </select>
                 </div>
-                <div style="display: flex; align-items: center;">
-                    <label for="payload" style="width: 180px; font-size: 0.9em;">Link</label>
-                    <input type="text" id="payload" name="payload" required style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%; flex: 0 0 60%; box-sizing: border-box;">
+                <div class="admin-form-row">
+                    <label for="payload" class="admin-form-label admin-form-label--medium">Link</label>
+                    <input type="text" id="payload" name="payload" required class="admin-field admin-field--wide">
                 </div>
-                <div style="display: flex; align-items: center;">
-                    <label for="notes" style="width: 180px; font-size: 0.9em;">Notes</label>
-                    <textarea id="notes" name="notes" placeholder="Optional" rows="1" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%; flex: 0 0 60%; box-sizing: border-box; resize: vertical;"></textarea>
+                <div class="admin-form-row">
+                    <label for="notes" class="admin-form-label admin-form-label--medium">Notes</label>
+                    <textarea id="notes" name="notes" placeholder="Optional" rows="1" class="admin-field admin-field--wide"></textarea>
                 </div>
                 <div class="admin-btn-row admin-btn-row--spaced">
-                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Submit Request</button>
+                    <button type="submit" class="next-button admin-btn button-accent">Submit Request</button>
                 </div>
             </form>
         {% endif %}
     </div>
 
-    <h2 style="margin-top: 40px;">Account &amp; Session</h2>
+    <h2 class="section-heading">Account &amp; Session</h2>
     <div class="stat-card account-session-card">
         {% if user_message and not is_admin %}
         <div class="account-session-message">{{ user_message }}</div>
@@ -262,28 +221,28 @@
         <div class="admin-btn-row">
             <a href="{{ url_for('logout') }}" class="button-link next-button admin-btn">Log out</a>
             {% if not is_admin %}
-            <form action="{{ url_for('delete_own_account') }}" method="post" style="margin: 0;">
+            <form action="{{ url_for('delete_own_account') }}" method="post" class="form-inline">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button type="submit" class="next-button admin-btn" style="background-color: #d32f2f;" onclick="return confirm('Delete your account and all ratings?');">Delete Account</button>
+                <button type="submit" class="next-button admin-btn button-danger" onclick="return confirm('Delete your account and all ratings?');">Delete Account</button>
             </form>
             {% endif %}
         </div>
     </div>
 
     {% if is_admin %}
-    <h2 style="margin-top: 40px;">User Management</h2>
+    <h2 class="section-heading">User Management</h2>
     <div class="stat-card">
         {% if user_message %}
-        <div style="margin-bottom: 10px; color: #ffcc00;">{{ user_message }}</div>
+        <div class="admin-warning">{{ user_message }}</div>
         {% endif %}
-        <form action="{{ url_for('purge_inactive_users') }}" method="post" style="display: none; align-items: center; gap: 10px; margin-bottom: 15px;">
+        <form action="{{ url_for('purge_inactive_users') }}" method="post" class="admin-form-row admin-form-row--gap admin-form-row--spaced is-hidden">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label for="inactive_days" style="min-width: 220px;">Delete users inactive for (days):</label>
-            <input type="number" id="inactive_days" name="inactive_days" min="1" value="{{ inactive_days or 30 }}" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 120px;">
-            <button type="submit" class="next-button admin-btn" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete inactive users and their ratings?');">Delete Inactive</button>
+            <label for="inactive_days" class="admin-form-label admin-form-label--min">Delete users inactive for (days):</label>
+            <input type="number" id="inactive_days" name="inactive_days" min="1" value="{{ inactive_days or 30 }}" class="admin-field admin-field--sm">
+            <button type="submit" class="next-button admin-btn button-compact button-danger" onclick="return confirm('Delete inactive users and their ratings?');">Delete Inactive</button>
         </form>
         {% if users %}
-        <table>
+        <table class="data-table">
             <thead>
                 <tr>
                     <th>User</th>
@@ -296,7 +255,7 @@
             </thead>
             <tbody>
                 {% for u in users %}
-                <tr {% if u.inactive %}style="color: #ffcc00;"{% endif %}>
+                <tr {% if u.inactive %}class="data-table-row-warning"{% endif %}>
                     <td>{{ u.id }}</td>
                     <td>{{ u.role }}</td>
                     <td>{{ u.status }}</td>
@@ -304,12 +263,12 @@
                     <td>{{ u.last_seen_display }}</td>
                     <td>
                         {% if u.protected %}
-                        <span style="color: #888;">Protected</span>
+                        <span class="text-muted">Protected</span>
                         {% else %}
-                        <form action="{{ url_for('delete_user') }}" method="post" style="display: inline;">
+                        <form action="{{ url_for('delete_user') }}" method="post" class="form-inline">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="user_id" value="{{ u.id }}">
-                            <button type="submit" class="next-button admin-btn" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete user {{ u.id }} and all ratings?');">Delete</button>
+                            <button type="submit" class="next-button admin-btn button-compact button-danger" onclick="return confirm('Delete user {{ u.id }} and all ratings?');">Delete</button>
                         </form>
                         {% endif %}
                     </td>
@@ -318,15 +277,15 @@
             </tbody>
         </table>
         {% else %}
-        <p style="margin: 0; color: #aaa;">No users found.</p>
+        <p class="empty-state">No users found.</p>
         {% endif %}
     </div>
     {% endif %}
 
     {% if is_admin %}
-    <h2 style="margin-top: 40px;">Database</h2>
+    <h2 class="section-heading">Database</h2>
     <div class="stat-card">
-        <p style="margin: 0; color: #aaa;">(Placeholder for future database management features)</p>
+        <p class="empty-state">(Placeholder for future database management features)</p>
     </div>
     {% endif %}
 </div>

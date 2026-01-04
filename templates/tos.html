@@ -5,25 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>prism | terms</title>
-    <style>
-        .policy-content {
-            line-height: 1.6;
-            color: #ccc;
-        }
-        .policy-content h3 {
-            color: #fff;
-            margin-top: 25px;
-            border-bottom: 1px solid #333;
-            padding-bottom: 5px;
-        }
-        .policy-content ul {
-            list-style-type: disc;
-            margin-left: 20px;
-        }
-        .policy-content li {
-            margin-bottom: 5px;
-        }
-    </style>
 </head>
 <body>
 
@@ -33,7 +14,7 @@
     </div>
 
     <h1>Terms of Service</h1>
-    <p style="color: #888; font-size: 0.9em;">Last updated: {{ current_date }}</p>
+    <p class="meta-text">Last updated: {{ current_date }}</p>
 
     <div class="policy-content">
         <h3>1. Acceptance of Terms</h3>
@@ -62,7 +43,7 @@
         <p>To the maximum extent permitted by law, we disclaim all warranties and will not be liable for any indirect, incidental, or consequential damages arising from your use of the App.</p>
 
         <h3>8. Termination</h3>
-        <p>We may revoke access to the App at any time. You may stop using the App and revoke Google access in your <a href="https://myaccount.google.com/permissions" target="_blank">Google Security Settings</a>. You can deleteyour account at any time in the admin section, which will remove your associated data from our systems.</p>
+        <p>We may revoke access to the App at any time. You may stop using the App and revoke Google access in your <a href="https://myaccount.google.com/permissions" target="_blank">Google Security Settings</a>. You can delete your account at any time in the admin section, which will remove your associated data from our systems.</p>
 
         <h3>9. Changes to These Terms</h3>
         <p>We may update these Terms from time to time. Your continued use of the App after changes become effective constitutes acceptance of the updated Terms.</p>
@@ -71,7 +52,7 @@
         <p>If you have questions about these Terms, please contact the repository maintainer via <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank">GitHub</a>.</p>
     </div>
 
-    <div style="margin-top: 40px; text-align: center;">
+    <div class="policy-footer">
         <a href="{{ url_for('index') }}" class="button-link next-button">Back to App</a>
     </div>
 </div>

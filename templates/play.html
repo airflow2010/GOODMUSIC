@@ -7,24 +7,12 @@
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <title>prism | play</title>
-    <style>
-        .filter-form { display: flex; flex-direction: column; gap: 6px; background-color: #2a2a2a; padding: 12px; border-radius: 4px; margin-bottom: 6px; }
-        .filter-row { display: grid; gap: 15px; align-items: center; }
-        .filter-row-top { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-        .filter-row-bottom { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        .filter-form .checkbox-group { margin-bottom: 0; }
-        .filter-actions { display: flex; justify-content: flex-end; }
-        #playing-form { display: flex; flex-direction: column; gap: 8px; }
-        #rating-form { display: block; }
-        .section-title { margin: 0 0 4px; }
-        .filter-form + .section-title { margin-top: 2px; }
-    </style>
 </head>
 <body>
 
 <div class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <div class="logo-wrap" style="margin-bottom: 0;">
+    <div class="page-header">
+        <div class="logo-wrap logo-wrap--compact">
             <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
         </div>
         <select onchange="window.location.href=this.value" class="nav-select">
@@ -74,10 +62,10 @@
                     <button type="submit" class="next-button">Apply</button>
                 </div>
             </div>
-            <div class="filter-row" style="grid-template-columns: 1fr; gap: 6px;">
+            <div class="filter-row filter-row--single">
                 <label for="selected_video_id">resulting playlist ({{ videos_count }} videos)</label>
-                <div style="display: flex; gap: 10px; width: 100%;">
-                    <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()" style="flex-grow: 1;">
+                <div class="playlist-controls">
+                    <select id="selected_video_id" name="selected_video_id" onchange="this.form.submit()" class="playlist-controls-select">
                         <option value="">-- Random / Shuffle --</option>
                         {% for v in playlist %}
                             <option value="{{ v.video_id }}" {% if video and video.video_id == v.video_id %}selected{% endif %}>
@@ -85,35 +73,35 @@
                             </option>
                         {% endfor %}
                     </select>
-                    <button type="submit" onclick="document.getElementById('selected_video_id').value='';" class="next-button" style="width: auto; white-space: nowrap;">Play Next</button>
-                    <button type="button" onclick="toggleExport()" class="next-button" style="background-color: mediumpurple; width: auto;">Export</button>
+                    <button type="submit" onclick="document.getElementById('selected_video_id').value='';" class="next-button button-compact">Play Next</button>
+                    <button type="button" onclick="toggleExport()" class="next-button button-accent button-compact">Export</button>
                 </div>
             </div>
 
-            <div id="export-section" style="display: none; background-color: #333; padding: 15px; margin-top: 10px; border-radius: 4px; border: 1px solid #555;">
-                <h4 style="margin-top:0;">Export to YouTube Playlist</h4>
-                <p id="export-account" style="font-size: 0.9em;">Not connected.</p>
+            <div id="export-section" class="export-section is-hidden">
+                <h4>Export to YouTube Playlist</h4>
+                <p id="export-account">Not connected.</p>
                 {% if not google_client_id %}
-                    <p style="color: #ff6b6b; font-size: 0.9em;">YouTube export is disabled because GOOGLE_CLIENT_ID is not configured.</p>
+                    <p class="export-warning">YouTube export is disabled because GOOGLE_CLIENT_ID is not configured.</p>
                 {% endif %}
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <div class="export-actions">
                     <button type="button" id="yt-connect-btn" class="save-button" {% if not google_client_id %}disabled{% endif %}>Connect YouTube</button>
                 </div>
-                <div id="export-controls" class="is-hidden" style="margin-top: 12px;">
-                    <div style="margin-bottom: 10px;">
+                <div id="export-controls" class="export-controls is-hidden">
+                    <div class="export-field">
                         <label>Select Playlist:</label>
-                        <select id="export_playlist_id" style="width: 100%;">
+                        <select id="export_playlist_id">
                             <option value="">-- Create New Playlist --</option>
                         </select>
                     </div>
-                    <div style="margin-bottom: 10px;">
+                    <div class="export-field">
                         <label>Or New Playlist Name:</label>
                         <input type="text" id="new_playlist_name" placeholder="My New Playlist">
                     </div>
                     <button type="button" id="yt-export-btn" class="save-button" disabled>Start Export</button>
                 </div>
-                <div id="export-status" style="margin-top: 8px; font-size: 0.9em;"></div>
-                <p style="font-size: 0.8em; color: #aaa; margin-top: 8px;">
+                <div id="export-status" class="export-status"></div>
+                <p class="export-note">
                     Exports all {{ videos_count }} filtered videos. Keep this tab open during export.
                 </p>
             </div>
@@ -132,7 +120,7 @@
     {% if video %}
 
         {% if export_message %}
-            <div style="background-color: #2a2a2a; border-left: 5px solid #ff9800; padding: 10px; margin-bottom: 20px;">{{ export_message }}</div>
+            <div class="export-message">{{ export_message }}</div>
         {% endif %}
 
         <!-- YouTube Player -->
@@ -157,7 +145,7 @@
             <input type="hidden" name="exclude_rejected_hidden" value="{{ 'true' if filters.exclude_rejected else 'false' }}">
 
             <!-- Ratings -->
-            <div class="filter-row" style="grid-template-columns: 1fr 1fr;">
+            <div class="filter-row filter-row--split">
                 <div>
                     <label for="rating_music">rating_music:</label>
                     <select id="rating_music" name="rating_music" required class="{% if not video.date_rated %}unrated{% endif %}">
@@ -177,24 +165,24 @@
             </div>
 
             <!-- Genre, Booleans, Save Button -->
-            <div style="display: flex; align-items: center; gap: 15px; margin-top: 10px;">
-                <div style="flex-grow: 1;">
-                    <input type="text" id="genre" name="genre" value="{{ video.genre }}" list="genre_list" autocomplete="off" placeholder="genre" style="width: 100%;">
+            <div class="rating-row">
+                <div class="rating-row-field">
+                    <input type="text" id="genre" name="genre" value="{{ video.genre }}" list="genre_list" autocomplete="off" placeholder="genre">
                     <datalist id="genre_list">
                         {% for g in genres %}
                             <option value="{{ g }}">
                         {% endfor %}
                     </datalist>
                 </div>
-                <div class="checkbox-group" style="margin-bottom: 0;">
+                <div class="checkbox-group checkbox-group--tight">
                     <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
                     <label for="favorite">⭐</label>
                 </div>
-                <div class="checkbox-group" style="margin-bottom: 0;">
+                <div class="checkbox-group checkbox-group--tight">
                     <input type="checkbox" id="rejected" name="rejected" {% if video.rejected %}checked{% endif %}>
                     <label for="rejected">❌</label>
                 </div>
-                <button type="submit" class="save-button" style="width: auto; margin: 0; white-space: nowrap;">Save</button>
+                <button type="submit" class="save-button button-compact">Save</button>
             </div>
             </div>
         </form>
@@ -321,11 +309,13 @@
 
     function toggleExport() {
         const sec = document.getElementById('export-section');
-        if (sec.style.display === 'none') {
-            sec.style.display = 'block';
+        if (!sec) return;
+        const isHidden = sec.classList.contains('is-hidden');
+        if (isHidden) {
+            sec.classList.remove('is-hidden');
             loadYouTubeInfo(false);
         } else {
-            sec.style.display = 'none';
+            sec.classList.add('is-hidden');
         }
     }
 

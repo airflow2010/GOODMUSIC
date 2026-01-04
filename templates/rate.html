@@ -10,8 +10,8 @@
 <body>
 
 <div class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <div class="logo-wrap" style="margin-bottom: 0;">
+    <div class="page-header">
+        <div class="logo-wrap logo-wrap--compact">
             <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
         </div>
         <select onchange="window.location.href=this.value" class="nav-select">
@@ -37,7 +37,7 @@
             <div id="player"></div>
         </div>
 
-        <form action="{{ url_for('save_rating', video_id=video.video_id) }}" method="post">
+        <form action="{{ url_for('save_rating', video_id=video.video_id) }}" method="post" class="form-grid">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <!-- Ratings -->
             <div>
@@ -69,7 +69,7 @@
             </div>
 
             <!-- Booleans -->
-            <div style="display: flex; gap: 20px;">
+            <div class="rating-flags">
                 <div class="checkbox-group">
                     <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
                     <label for="favorite">⭐ favorite</label>
@@ -83,7 +83,7 @@
             <!-- Buttons -->
             <div class="button-group">
                 <a href="{{ url_for('rating_mode') }}" class="button-link next-button">Skip & Next</a>
-                <span style="color: grey;">{{ videos_left }} videos left to rate</span>
+                <span class="text-muted">{{ videos_left }} videos left to rate</span>
                 <button type="submit" class="save-button">Save & Next</button>
             </div>
         </form>
