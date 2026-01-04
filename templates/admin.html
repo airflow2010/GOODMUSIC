@@ -12,6 +12,39 @@
         tr:hover { background-color: #2a2a2a; }
         .stat-card { background-color: #2a2a2a; padding: 15px; border-radius: 4px; margin-bottom: 10px; }
         .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .admin-btn {
+            height: 44px;
+            min-height: 44px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 0 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            box-sizing: border-box;
+        }
+        .admin-btn-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .admin-btn-row--end {
+            justify-content: flex-end;
+        }
+
+        .admin-btn-row--spaced {
+            margin-top: 10px;
+        }
+        .account-session-card { padding: 18px; }
+        .account-session-row { display: flex; align-items: center; gap: 12px; }
+        .account-session-icon { width: 36px; height: 36px; color: #888; flex: 0 0 auto; }
+        .account-session-details { display: flex; flex-direction: column; }
+        .account-session-identifier { font-weight: 600; }
+        .account-session-status { font-size: 0.85em; color: #888; }
+        .account-session-divider { height: 1px; background-color: #333; margin: 12px 0; }
+        .account-session-message { margin-bottom: 10px; color: #ffcc00; }
     </style>
 </head>
 <body>
@@ -46,15 +79,15 @@
             <span>{{ stats.total_entries }}</span>
         </div>
         <div class="stat-row">
-            <strong>Rated Entries (you):</strong>
+            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; position: relative; top: -3px;"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Rated Entries:</strong>
             <span>{{ stats.rated_count }} ({{ stats.rated_pct }}%)</span>
         </div>
         <div class="stat-row">
-            <strong>Favorites (you):</strong>
+            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; position: relative; top: -3px;"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Favorites:</strong>
             <span>{{ stats.favorite_count }} ({{ stats.favorite_pct }}%)</span>
         </div>
         <div class="stat-row">
-            <strong>Rejected (you):</strong>
+            <strong><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; position: relative; top: -3px;"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path></svg>Rejected:</strong>
             <span>{{ stats.rejected_count }} ({{ stats.rejected_pct }}%)</span>
         </div>
     </div>
@@ -104,8 +137,8 @@
                         <td>
                             <form action="{{ url_for('update_import_request', request_id=req.id) }}" method="post" style="display: flex; gap: 6px;">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <button type="submit" name="status" value="imported" class="next-button" style="width: auto;">Mark Imported</button>
-                                <button type="submit" name="status" value="rejected" class="next-button" style="width: auto; background-color: #d32f2f;">Reject</button>
+                                <button type="submit" name="status" value="imported" class="next-button admin-btn" style="width: auto;">Mark Imported</button>
+                                <button type="submit" name="status" value="rejected" class="next-button admin-btn" style="width: auto; background-color: #d32f2f;">Reject</button>
                             </form>
                         </td>
                     </tr>
@@ -144,7 +177,9 @@
                      <label for="substack_url" style="width: 280px; font-size: 0.9em;">--substack</label>
                      <input type="text" id="substack_url" name="substack_url" value="https://goodmusic.substack.com/archive" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
                 </div>
-                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+                <div class="admin-btn-row admin-btn-row--spaced">
+                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Import</button>
+                </div>
             </form>
             
             <pre id="scraper-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 300px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
@@ -160,7 +195,9 @@
                     <label for="playlist_limit" style="width: 280px; font-size: 0.9em;">Limit (0 for all)</label>
                     <input type="number" id="playlist_limit" name="playlist_limit" value="0" min="0" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 100px;">
                 </div>
-                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+                <div class="admin-btn-row admin-btn-row--spaced">
+                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Import</button>
+                </div>
             </form>
             <pre id="playlist-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 220px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
 
@@ -171,12 +208,15 @@
                     <label for="video_ids" style="width: 280px; font-size: 0.9em;">Video IDs (comma or newline separated)</label>
                     <input type="text" id="video_ids" name="video_ids" placeholder="abc123, def456" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 50%;">
                 </div>
-                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Import</button>
+                <div class="admin-btn-row admin-btn-row--spaced">
+                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Import</button>
+                </div>
             </form>
             <pre id="single-video-output" style="background-color: #111; color: #0f0; padding: 15px; border-radius: 4px; margin-top: 15px; height: 180px; overflow-y: auto; display: none; white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
             {% endif %}
         {% else %}
             <h3>Suggest an Import</h3>
+            <p style="margin-bottom: 15px; color: #999;">Requests are reviewed by the admin before importing.</p>
             <form action="{{ url_for('request_import') }}" method="post" style="display: flex; flex-direction: column; gap: 10px;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div style="display: flex; align-items: center;">
@@ -188,27 +228,45 @@
                     </select>
                 </div>
                 <div style="display: flex; align-items: center;">
-                    <label for="payload" style="width: 180px; font-size: 0.9em;">Payload</label>
-                    <textarea id="payload" name="payload" required rows="3" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%;"></textarea>
+                    <label for="payload" style="width: 180px; font-size: 0.9em;">Link</label>
+                    <input type="text" id="payload" name="payload" required style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%; flex: 0 0 60%; box-sizing: border-box;">
                 </div>
                 <div style="display: flex; align-items: center;">
                     <label for="notes" style="width: 180px; font-size: 0.9em;">Notes</label>
-                    <input type="text" id="notes" name="notes" placeholder="Optional" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%;">
+                    <textarea id="notes" name="notes" placeholder="Optional" rows="1" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 60%; flex: 0 0 60%; box-sizing: border-box; resize: vertical;"></textarea>
                 </div>
-                <button type="submit" class="next-button" style="width: auto; margin-top: 10px; align-self: flex-end; background-color: mediumpurple;">Submit Request</button>
+                <div class="admin-btn-row admin-btn-row--spaced">
+                    <button type="submit" class="next-button admin-btn" style="background-color: mediumpurple;">Submit Request</button>
+                </div>
             </form>
-            <p style="margin-top: 10px; color: #aaa;">Requests are reviewed by the admin before importing.</p>
         {% endif %}
     </div>
 
-    <h2 style="margin-top: 40px;">Authentication</h2>
-    <div class="stat-card">
-        <div class="stat-row">
-            <strong>Current Session:</strong>
-            <span>{{ auth_status }}</span>
+    <h2 style="margin-top: 40px;">Account &amp; Session</h2>
+    <div class="stat-card account-session-card">
+        {% if user_message and not is_admin %}
+        <div class="account-session-message">{{ user_message }}</div>
+        {% endif %}
+        <div class="account-session-row">
+            <div class="account-session-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor">
+                    <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4.42 0-8 2-8 4.5V21h16v-2.5C20 16 16.42 14 12 14z"></path>
+                </svg>
+            </div>
+            <div class="account-session-details">
+                <div class="account-session-identifier">{{ user_id }}</div>
+                <div class="account-session-status">Currently signed in</div>
+            </div>
         </div>
-        <div style="margin-top: 15px; text-align: right;">
-            <a href="{{ url_for('logout') }}" class="button-link" style="background-color: #d32f2f; color: white;">Logout</a>
+        <div class="account-session-divider"></div>
+        <div class="admin-btn-row">
+            <a href="{{ url_for('logout') }}" class="button-link next-button admin-btn">Log out</a>
+            {% if not is_admin %}
+            <form action="{{ url_for('delete_own_account') }}" method="post" style="margin: 0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="next-button admin-btn" style="background-color: #d32f2f;" onclick="return confirm('Delete your account and all ratings?');">Delete Account</button>
+            </form>
+            {% endif %}
         </div>
     </div>
 
@@ -218,11 +276,11 @@
         {% if user_message %}
         <div style="margin-bottom: 10px; color: #ffcc00;">{{ user_message }}</div>
         {% endif %}
-        <form action="{{ url_for('purge_inactive_users') }}" method="post" style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+        <form action="{{ url_for('purge_inactive_users') }}" method="post" style="display: none; align-items: center; gap: 10px; margin-bottom: 15px;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label for="inactive_days" style="min-width: 220px;">Delete users inactive for (days):</label>
             <input type="number" id="inactive_days" name="inactive_days" min="1" value="{{ inactive_days or 30 }}" style="padding: 8px; border-radius: 4px; border: 1px solid #555; background: #222; color: #fff; width: 120px;">
-            <button type="submit" class="next-button" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete inactive users and their ratings?');">Delete Inactive</button>
+            <button type="submit" class="next-button admin-btn" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete inactive users and their ratings?');">Delete Inactive</button>
         </form>
         {% if users %}
         <table>
@@ -251,7 +309,7 @@
                         <form action="{{ url_for('delete_user') }}" method="post" style="display: inline;">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="user_id" value="{{ u.id }}">
-                            <button type="submit" class="next-button" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete user {{ u.id }} and all ratings?');">Delete</button>
+                            <button type="submit" class="next-button admin-btn" style="width: auto; background-color: #d32f2f;" onclick="return confirm('Delete user {{ u.id }} and all ratings?');">Delete</button>
                         </form>
                         {% endif %}
                     </td>

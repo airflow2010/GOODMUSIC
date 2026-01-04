@@ -1058,6 +1058,7 @@ def admin_mode():
             stats=stats,
             import_restricted=import_restricted,
             auth_status=auth_status,
+            user_id=user.get("id"),
             is_admin=is_admin,
             import_requests=import_requests,
             request_submitted=bool(request.args.get("request_submitted")),
@@ -1198,6 +1199,29 @@ def delete_user():
     else:
         msg = f"Failed to delete user {user_id}."
     return redirect(url_for("admin_mode", user_message=msg))
+
+
+@app.route("/admin/users/self-delete", methods=["POST"])
+@requires_auth
+@requires_csrf
+def delete_own_account():
+    """Allow non-admin users to delete their own account and ratings."""
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+    user = current_user()
+    if user.get("role") == "admin":
+        return redirect(url_for("admin_mode", user_message="Admin account cannot be deleted."))
+
+    user_id = user.get("id")
+    if not user_id:
+        return redirect(url_for("admin_mode", user_message="Missing user id."))
+
+    result = delete_user_and_ratings(user_id)
+    if result.get("deleted"):
+        session.clear()
+        return redirect(url_for("index"))
+
+    return redirect(url_for("admin_mode", user_message="Failed to delete your account."))
 
 
 @app.route("/admin/users/purge", methods=["POST"])
