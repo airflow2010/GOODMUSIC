@@ -78,6 +78,30 @@ def main():
 
     rating_key = ensure_admin_user(db, admin_user, auth_provider)
 
+    if args.remove_legacy:
+        missing_count = 0
+        missing_samples = []
+        docs = db.collection(COLLECTION_NAME).stream()
+        for doc in docs:
+            data = doc.to_dict() or {}
+            ratings = data.get("ratings") or {}
+            legacy_rating = build_legacy_rating(data)
+            if legacy_rating and rating_key not in ratings:
+                missing_count += 1
+                if len(missing_samples) < 10:
+                    missing_samples.append(doc.id)
+        if missing_count:
+            print(
+                f"❌ Found {missing_count} docs with legacy ratings but no migrated ratings for '{admin_user}'.",
+                file=sys.stderr,
+            )
+            print("   Run the migration without --remove-legacy first, then re-run with --remove-legacy.", file=sys.stderr)
+            for doc_id in missing_samples:
+                print(f"   - {doc_id}", file=sys.stderr)
+            if missing_count > len(missing_samples):
+                print(f"   ... and {missing_count - len(missing_samples)} more", file=sys.stderr)
+            sys.exit(1)
+
     migrated = 0
     skipped = 0
     updated_rand = 0
@@ -92,22 +116,10 @@ def main():
             updates["rand"] = random.random()
 
         ratings = data.get("ratings") or {}
-        if rating_key in ratings:
-            if updates:
-                if args.dry_run:
-                    print(f"[dry-run] update rand for {doc.id}")
-                else:
-                    doc.reference.update(updates)
-                updated_rand += 1
-            skipped += 1
-            continue
-
         legacy_rating = build_legacy_rating(data)
-        if legacy_rating:
-            updates[f"ratings.{rating_key}"] = legacy_rating
-            migrated += 1
 
-            if args.remove_legacy:
+        if args.remove_legacy:
+            if legacy_rating and rating_key in ratings:
                 updates.update({
                     "rating_music": firestore.DELETE_FIELD,
                     "rating_video": firestore.DELETE_FIELD,
@@ -117,7 +129,21 @@ def main():
                 })
                 removed_legacy += 1
         else:
-            skipped += 1
+            if rating_key in ratings:
+                if updates:
+                    if args.dry_run:
+                        print(f"[dry-run] update rand for {doc.id}")
+                    else:
+                        doc.reference.update(updates)
+                    updated_rand += 1
+                skipped += 1
+                continue
+
+            if legacy_rating:
+                updates[f"ratings.{rating_key}"] = legacy_rating
+                migrated += 1
+            else:
+                skipped += 1
 
         if updates:
             if args.dry_run:
