@@ -875,9 +875,562 @@ input[type="range"]::-moz-range-thumb {
     display: none;
 }
 
-@media (max-width: 720px) {
+/* ============================================================
+   MOBILE RESPONSIVE STYLES
+   ============================================================ */
+
+/* Tablets and small screens (landscape phones) */
+@media (max-width: 768px) {
+    body {
+        margin: 10px;
+    }
+
+    .container {
+        padding: 15px;
+    }
+
+    /* Header adjustments */
+    .page-header {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+
+    .logo {
+        max-width: 150px;
+    }
+
+    .nav-select {
+        width: auto;
+        min-width: 120px;
+        font-size: 1em;
+    }
+
+    /* Form grids - stack vertically, except rating fields which stay inline */
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    /* Keep rating and genre dropdowns with inline labels on mobile */
+    .form-grid > div:has(#rating_music),
+    .form-grid > div:has(#rating_video),
+    .form-grid > div:has(#genre) {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .form-grid > div:has(#rating_music) label,
+    .form-grid > div:has(#rating_video) label,
+    .form-grid > div:has(#genre) label {
+        margin-bottom: 0;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .form-grid > div:has(#rating_music) select,
+    .form-grid > div:has(#rating_video) select,
+    .form-grid > div:has(#genre) input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* Filter rows - stack vertically */
+    .filter-row-top {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .filter-row-bottom {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .filter-row--split {
+        grid-template-columns: 1fr;
+    }
+
+    /* Button groups - text on top, buttons in row below */
+    .button-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    /* Center the middle text in button group and move to top, full width */
+    .button-group .text-muted {
+        text-align: center;
+        order: -1;
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    /* Buttons share the row equally */
+    .button-group button,
+    .button-group .button-link {
+        flex: 1 1 calc(50% - 5px);
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    /* Ensure buttons don't overflow container */
+    button, .button-link {
+        box-sizing: border-box;
+        max-width: 100%;
+    }
+
+    /* Rating row - stack vertically */
+    .rating-row {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    .rating-row-field {
+        width: 100%;
+    }
+
+    .rating-flags {
+        flex-direction: row;
+        justify-content: center;
+        gap: 15px;
+        flex-wrap: wrap;
+    }
+
+    /* Playlist controls */
+    .playlist-controls {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .playlist-controls button {
+        width: 100%;
+    }
+
+    /* Export actions */
+    .export-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .export-actions button {
+        width: 100%;
+    }
+
+    /* Admin forms */
+    .admin-form-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .admin-form-label,
+    .admin-form-label--wide,
+    .admin-form-label--medium,
+    .admin-form-label--min {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .admin-field,
+    .admin-field--xs,
+    .admin-field--sm,
+    .admin-field--md,
+    .admin-field--half,
+    .admin-field--wide {
+        width: 100% !important;
+        flex: 1 1 100%;
+    }
+
+    .admin-btn-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .admin-btn-row button,
+    .admin-btn-row .button-link {
+        width: 100%;
+    }
+
+    /* Tables - make scrollable */
+    .data-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .data-table thead,
+    .data-table tbody,
+    .data-table tr {
+        display: table;
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 8px;
+        font-size: 0.9em;
+    }
+
+    /* Stat cards */
+    .stat-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+
+    /* Account session */
+    .account-session-row {
+        gap: 10px;
+    }
+
+    .account-session-icon {
+        width: 32px;
+        height: 32px;
+    }
+
+    /* Login page */
+    .login-container {
+        padding: 20px 15px;
+    }
+
+    .login-logo {
+        max-width: 280px;
+    }
+
     .login-features {
         grid-template-columns: 1fr;
         gap: 16px;
+    }
+
+    .login-btn {
+        min-width: 200px;
+        padding: 12px 24px;
+        font-size: 1em;
+    }
+
+    .login-footer {
+        flex-direction: column;
+        gap: 8px;
+        text-align: center;
+    }
+
+    /* Video container maintains aspect ratio */
+    .video-container {
+        margin-bottom: 15px;
+    }
+
+    /* Info section */
+    .info {
+        font-size: 0.9em;
+    }
+
+    .info p {
+        word-break: break-word;
+    }
+
+    /* Headings */
+    h1 {
+        font-size: 1.5em;
+    }
+
+    h2 {
+        font-size: 1.3em;
+    }
+
+    h3 {
+        font-size: 1.1em;
+    }
+
+    /* Sections */
+    .section-heading {
+        margin-top: 30px;
+    }
+
+    .section-subheading {
+        margin-top: 15px;
+    }
+}
+
+/* Mobile phones (portrait) */
+@media (max-width: 480px) {
+    body {
+        margin: 5px;
+    }
+
+    .container {
+        padding: 12px;
+        border-radius: 6px;
+    }
+
+    /* Even more compact header */
+    .page-header {
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .logo {
+        max-width: 120px;
+    }
+
+    /* Tighter spacing */
+    .form-grid {
+        gap: 12px;
+    }
+
+    .filter-row-top,
+    .filter-row-bottom {
+        gap: 10px;
+    }
+
+    /* Labels */
+    label {
+        font-size: 1em;
+        margin-bottom: 4px;
+    }
+
+    /* Input fields - ensure comfortable touch targets */
+    input[type="text"],
+    input[type="number"],
+    select,
+    textarea {
+        padding: 10px;
+        font-size: 16px; /* Prevents iOS zoom on focus */
+    }
+
+    /* Buttons - comfortable touch targets */
+    button,
+    .button-link {
+        padding: 12px 16px;
+        font-size: 15px;
+        min-height: 44px; /* iOS recommended minimum */
+    }
+
+    .button-compact {
+        padding: 10px 14px;
+        min-height: 44px;
+    }
+
+    .admin-btn {
+        min-height: 44px;
+        font-size: 14px;
+        padding: 0 16px;
+    }
+
+    /* Checkboxes - larger for touch */
+    .checkbox-group input[type="checkbox"] {
+        transform: scale(1.8);
+        margin-right: 8px;
+    }
+
+    /* Rating flags - keep in row even on small screens */
+    .rating-flags {
+        flex-direction: row;
+        gap: 15px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    /* Tables - even more compact */
+    .data-table th,
+    .data-table td {
+        padding: 6px;
+        font-size: 0.85em;
+    }
+
+    .data-table-cell-wrap {
+        max-width: 200px;
+    }
+
+    /* Login page */
+    .login-container {
+        padding: 15px 10px;
+    }
+
+    .login-logo {
+        max-width: 220px;
+    }
+
+    .login-title {
+        font-size: 1.2em;
+        margin: 10px 0 20px;
+    }
+
+    .login-features {
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .login-card {
+        --surface-padding: 14px;
+    }
+
+    .login-card h3 {
+        font-size: 1em;
+    }
+
+    .login-card p {
+        font-size: 0.9em;
+    }
+
+    .login-btn {
+        min-width: 180px;
+        padding: 11px 20px;
+        font-size: 0.95em;
+    }
+
+    .login-actions {
+        margin-top: 20px;
+    }
+
+    .login-footer {
+        margin-top: 20px;
+        font-size: 0.85em;
+    }
+
+    /* Video info */
+    .info {
+        font-size: 0.85em;
+    }
+
+    .info p {
+        margin: 4px 0;
+    }
+
+    /* Headings - more compact */
+    h1 {
+        font-size: 1.3em;
+    }
+
+    h2 {
+        font-size: 1.2em;
+    }
+
+    h3 {
+        font-size: 1em;
+    }
+
+    /* Section spacing */
+    .section-heading {
+        margin-top: 25px;
+    }
+
+    .section-subheading {
+        margin-top: 12px;
+    }
+
+    /* Stat cards */
+    .stat-card {
+        --surface-padding: 12px;
+    }
+
+    /* Export section */
+    .export-section {
+        --surface-padding: 12px;
+    }
+
+    /* Filter form */
+    .filter-form {
+        --surface-padding: 10px;
+    }
+
+    /* Admin outputs */
+    .admin-output--tall {
+        height: 200px;
+    }
+
+    .admin-output--medium {
+        height: 160px;
+    }
+
+    .admin-output--short {
+        height: 140px;
+    }
+
+    /* Account session */
+    .account-session-card {
+        --surface-padding: 14px;
+    }
+
+    .account-session-icon {
+        width: 28px;
+        height: 28px;
+    }
+
+    .account-session-identifier {
+        font-size: 0.95em;
+    }
+
+    .account-session-status {
+        font-size: 0.8em;
+    }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+    body {
+        margin: 3px;
+    }
+
+    .container {
+        padding: 10px;
+    }
+
+    .logo {
+        max-width: 100px;
+    }
+
+    .login-logo {
+        max-width: 180px;
+    }
+
+    .login-btn {
+        min-width: 160px;
+        padding: 10px 18px;
+    }
+
+    /* Make tables fully responsive on tiny screens */
+    .data-table,
+    .data-table thead,
+    .data-table tbody,
+    .data-table tr,
+    .data-table th,
+    .data-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .data-table thead {
+        display: none; /* Hide headers on very small screens */
+    }
+
+    .data-table tr {
+        margin-bottom: 15px;
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        padding: 10px;
+    }
+
+    .data-table td {
+        text-align: left;
+        padding: 8px 0;
+        border: none;
+        position: relative;
+        padding-left: 50%;
+    }
+
+    .data-table td:before {
+        content: attr(data-label);
+        position: absolute;
+        left: 0;
+        width: 45%;
+        padding-right: 10px;
+        font-weight: bold;
+        color: var(--color-text-muted);
     }
 }
