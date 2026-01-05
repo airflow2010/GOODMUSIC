@@ -133,9 +133,8 @@
         </div>
 
         <h2 class="section-title">{% if video.date_rated %}change rating of video{% else %}rate video{% endif %}</h2>
-        <form id="rating-form" action="{{ url_for('save_play_rating', video_id=video.video_id) }}" method="post">
+        <form id="rating-form" action="{{ url_for('save_play_rating', video_id=video.video_id) }}" method="post" class="form-grid">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="filter-form">
             <!-- Hidden fields to preserve filters -->
             <input type="hidden" name="min_rating_music_hidden" value="{{ filters.min_rating_music }}">
             <input type="hidden" name="min_rating_video_hidden" value="{{ filters.min_rating_video }}">
@@ -145,45 +144,47 @@
             <input type="hidden" name="exclude_rejected_hidden" value="{{ 'true' if filters.exclude_rejected else 'false' }}">
 
             <!-- Ratings -->
-            <div class="filter-row filter-row--split">
-                <div>
-                    <label for="rating_music">rating_music:</label>
-                    <select id="rating_music" name="rating_music" required class="{% if not video.date_rated %}unrated{% endif %}">
-                        {% for val, desc in music_ratings.items()|sort(reverse=True) %}
-                            <option value="{{ val }}" {% if val == video.rating_music %}selected{% endif %}>{{ desc }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label for="rating_video">rating_video:</label>
-                    <select id="rating_video" name="rating_video" required class="{% if not video.date_rated %}unrated{% endif %}">
-                        {% for val, desc in video_ratings.items()|sort(reverse=True) %}
-                            <option value="{{ val }}" {% if val == video.rating_video %}selected{% endif %}>{{ desc }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+            <div>
+                <label for="rating_music">rating_music:</label>
+                <select id="rating_music" name="rating_music" required class="{% if not video.date_rated %}unrated{% endif %}">
+                    {% for val, desc in music_ratings.items()|sort(reverse=True) %}
+                        <option value="{{ val }}" {% if val == video.rating_music %}selected{% endif %}>{{ desc }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="rating_video">rating_video:</label>
+                <select id="rating_video" name="rating_video" required class="{% if not video.date_rated %}unrated{% endif %}">
+                    {% for val, desc in video_ratings.items()|sort(reverse=True) %}
+                        <option value="{{ val }}" {% if val == video.rating_video %}selected{% endif %}>{{ desc }}</option>
+                    {% endfor %}
+                </select>
             </div>
 
-            <!-- Genre, Booleans, Save Button -->
-            <div class="rating-row">
-                <div class="rating-row-field">
-                    <input type="text" id="genre" name="genre" value="{{ video.genre }}" list="genre_list" autocomplete="off" placeholder="genre">
-                    <datalist id="genre_list">
-                        {% for g in genres %}
-                            <option value="{{ g }}">
-                        {% endfor %}
-                    </datalist>
-                </div>
-                <div class="checkbox-group checkbox-group--tight">
-                    <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
-                    <label for="favorite">⭐</label>
-                </div>
-                <div class="checkbox-group checkbox-group--tight">
-                    <input type="checkbox" id="rejected" name="rejected" {% if video.rejected %}checked{% endif %}>
-                    <label for="rejected">❌</label>
-                </div>
-                <button type="submit" class="save-button button-compact">Save</button>
+            <!-- Genre -->
+            <div>
+                <label for="genre">genre:</label>
+                <input type="text" id="genre" name="genre" value="{{ video.genre }}" list="genre_list" autocomplete="off">
+                <datalist id="genre_list">
+                    {% for g in genres %}
+                        <option value="{{ g }}">
+                    {% endfor %}
+                </datalist>
             </div>
+
+            <!-- Checkboxes and Save Button -->
+            <div class="rating-flags-with-button">
+                <div class="rating-flags">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="favorite" name="favorite" {% if video.favorite %}checked{% endif %}>
+                        <label for="favorite">⭐ favorite</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="rejected" name="rejected" {% if video.rejected %}checked{% endif %}>
+                        <label for="rejected">❌ rejected</label>
+                    </div>
+                </div>
+                <button type="submit" class="save-button">Save</button>
             </div>
         </form>
 
