@@ -1079,16 +1079,6 @@ input[type="range"]::-moz-range-thumb {
         flex: 1 1 100%;
     }
 
-    .admin-btn-row {
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .admin-btn-row button,
-    .admin-btn-row .button-link {
-        width: 100%;
-    }
-
     /* Tables - make scrollable but keep table layout consistent */
     .data-table {
         width: 100%;
@@ -1109,16 +1099,6 @@ input[type="range"]::-moz-range-thumb {
         gap: 10px;
     }
 
-    /* Account session */
-    .account-session-row {
-        gap: 10px;
-    }
-
-    .account-session-icon {
-        width: 32px;
-        height: 32px;
-    }
-
     /* Login page */
     .login-container {
         padding: 20px 15px;
@@ -1137,12 +1117,6 @@ input[type="range"]::-moz-range-thumb {
         min-width: 200px;
         padding: 12px 24px;
         font-size: 1em;
-    }
-
-    .login-footer {
-        flex-direction: column;
-        gap: 8px;
-        text-align: center;
     }
 
     /* Video container maintains aspect ratio */
@@ -1311,11 +1285,6 @@ input[type="range"]::-moz-range-thumb {
 
     .login-actions {
         margin-top: 20px;
-    }
-
-    .login-footer {
-        margin-top: 20px;
-        font-size: 0.85em;
     }
 
     /* Video info */
