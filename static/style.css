@@ -1089,33 +1089,16 @@ input[type="range"]::-moz-range-thumb {
         width: 100%;
     }
 
-    /* Tables - make scrollable */
+    /* Tables - make scrollable but keep table layout consistent */
     .data-table {
-        display: block;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    .data-table thead,
-    .data-table tbody,
-    .data-table tr {
-        display: table;
         width: 100%;
-        table-layout: fixed;
+        table-layout: auto;
     }
 
     .data-table th,
     .data-table td {
         padding: 8px;
         font-size: 0.9em;
-    }
-
-    /* Hide Status and Auth columns in User Management table on mobile */
-    .data-table th:nth-child(3),
-    .data-table td:nth-child(3),
-    .data-table th:nth-child(4),
-    .data-table td:nth-child(4) {
-        display: none;
     }
 
     /* Stat cards - keep labels and values on same line */

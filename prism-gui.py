@@ -1033,21 +1033,42 @@ def admin_mode():
         if is_admin:
             try:
                 now = datetime.now(timezone.utc)
+                # Get all videos to count ratings per user
+                video_docs = list(db.collection(COLLECTION_NAME).stream())
+
                 for doc in db.collection(USERS_COLLECTION).stream():
                     data = doc.to_dict() or {}
+                    user_id = doc.id
                     last_seen = get_last_activity_ts(data)
                     inactive = False
                     if inactive_days and last_seen:
                         inactive = (now - last_seen).days >= inactive_days
+
+                    # Count ratings for this user using the same logic as General Statistics
+                    ratings_count = 0
+                    # Create user object with rating_key for extract_user_rating
+                    user_rating_key = data.get("rating_key") or rating_key_for_user_id(user_id)
+                    user_obj = {"id": user_id, "rating_key": user_rating_key, "role": data.get("role") or "user"}
+                    for video_doc in video_docs:
+                        video_data = video_doc.to_dict()
+                        if not video_data:
+                            continue
+                        rating = extract_user_rating(video_data, user_obj)
+                        if rating.get("rated_at"):
+                            ratings_count += 1
+
+                    # Format date only (without time)
+                    last_seen_date = last_seen.strftime("%Y-%m-%d") if last_seen else "Never"
+
                     users.append({
-                        "id": doc.id,
+                        "id": user_id,
                         "role": data.get("role") or "user",
-                        "status": data.get("status") or "active",
-                        "auth_provider": data.get("auth_provider") or "unknown",
+                        "ratings_count": ratings_count,
                         "last_seen": last_seen,
                         "last_seen_display": format_ts(last_seen),
+                        "last_seen_date": last_seen_date,
                         "inactive": inactive,
-                        "protected": is_protected_user(doc.id, data, user.get("id")),
+                        "protected": is_protected_user(user_id, data, user.get("id")),
                     })
                 users.sort(key=lambda u: (u["protected"], u["id"]))
             except Exception as e:

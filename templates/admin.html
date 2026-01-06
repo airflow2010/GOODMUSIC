@@ -247,8 +247,7 @@
                 <tr>
                     <th>User</th>
                     <th>Role</th>
-                    <th>Status</th>
-                    <th>Auth</th>
+                    <th>Ratings</th>
                     <th>Last Seen</th>
                     <th>Action</th>
                 </tr>
@@ -258,9 +257,8 @@
                 <tr {% if u.inactive %}class="data-table-row-warning"{% endif %}>
                     <td>{{ u.id }}</td>
                     <td>{{ u.role }}</td>
-                    <td>{{ u.status }}</td>
-                    <td>{{ u.auth_provider }}</td>
-                    <td>{{ u.last_seen_display }}</td>
+                    <td>{{ u.ratings_count }}</td>
+                    <td><span title="{{ u.last_seen_display }}">{{ u.last_seen_date }}</span></td>
                     <td>
                         {% if u.protected %}
                         <span class="text-muted">Protected</span>
