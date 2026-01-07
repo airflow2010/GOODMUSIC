@@ -305,8 +305,13 @@ def select_best_audio_format(formats: list, max_size_mb: int = 25) -> Optional[s
     return None
 
 
-def _attempt_download(video_id: str, use_cookies: bool) -> Optional[str]:
-    """A single download attempt, with or without cookies."""
+def is_video_unavailable_error(error_text: str) -> bool:
+    lowered = error_text.lower()
+    return "video unavailable" in lowered and "not available" in lowered
+
+
+def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], Optional[str]]:
+    """A single download attempt, with or without cookies. Returns (path, error_code)."""
     # The final file will be .m4a after conversion
     target_m4a_path = f"/tmp/{video_id}.m4a"
     has_ffmpeg = shutil.which("ffmpeg") is not None
@@ -326,14 +331,17 @@ def _attempt_download(video_id: str, use_cookies: bool) -> Optional[str]:
         with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     except Exception as e:
-        if "Sign in to confirm your age" in str(e):
+        error_text = str(e)
+        if "Sign in to confirm your age" in error_text:
             print("     - ⚠️  YouTube requires sign-in (Age-gated). Cookies might be invalid or account not verified.")
         print(f"     - ⚠️ Could not fetch video formats: {e}")
-        return None
+        if is_video_unavailable_error(error_text):
+            return None, "video_unavailable"
+        return None, "audio_download_failed"
 
     if not info or "formats" not in info:
         print("     - ⚠️ No format information found.")
-        return None
+        return None, "audio_download_failed"
 
     # --- Step 2: Select the best format ---
     selected_format_id = select_best_audio_format(info["formats"], max_size_mb=25)
@@ -377,7 +385,7 @@ def _attempt_download(video_id: str, use_cookies: bool) -> Optional[str]:
             # If ffmpeg was used, we expect the .m4a file
             if has_ffmpeg and os.path.exists(target_m4a_path):
                 print(f"     - ✅ Successfully downloaded and converted audio to {target_m4a_path}")
-                return target_m4a_path
+                return target_m4a_path, None
             
             # If no ffmpeg, or conversion failed, find the actual downloaded file
             if "requested_downloads" in info:
@@ -387,19 +395,23 @@ def _attempt_download(video_id: str, use_cookies: bool) -> Optional[str]:
 
             if os.path.exists(filepath):
                 print(f"     - ✅ Successfully downloaded audio (raw) to {filepath}")
-                return filepath
-            
+                return filepath, None
+
             print(f"     - ⚠️ Download appeared to succeed, but file '{filepath}' was not found.")
-            return None
+            return None, "audio_download_failed"
 
     except Exception as e:
+        error_text = str(e)
+        if is_video_unavailable_error(error_text):
+            print(f"     - ⚠️ Video unavailable: {e}")
+            return None, "video_unavailable"
         print(f"     - ⚠️ Audio download failed: {e}")
-        return None
+        return None, "audio_download_failed"
 
-    return None
+    return None, "audio_download_failed"
 
 
-def download_audio_for_analysis(video_id: str) -> str | None:
+def download_audio_for_analysis(video_id: str) -> tuple[Optional[str], Optional[str]]:
     """
     Downloads the audio of a YouTube video to a temporary file for AI analysis.
     It first tries un-authenticated, then falls back to using cookies if that fails.
@@ -415,19 +427,26 @@ def download_audio_for_analysis(video_id: str) -> str | None:
 
     # --- Attempt 1: Un-authenticated ---
     print("   - Attempting download without authentication...")
-    download_path = _attempt_download(video_id, use_cookies=False)
+    error_codes = []
+    download_path, error_code = _attempt_download(video_id, use_cookies=False)
     if download_path:
-        return download_path
+        return download_path, None
+    if error_code:
+        error_codes.append(error_code)
 
     # --- Attempt 2: Authenticated (if cookies exist) ---
     if os.path.exists("cookies.txt"):
         print("\n   - Un-authenticated download failed. Retrying with authentication (cookies)...")
-        download_path = _attempt_download(video_id, use_cookies=True)
+        download_path, error_code = _attempt_download(video_id, use_cookies=True)
         if download_path:
-            return download_path
+            return download_path, None
+        if error_code:
+            error_codes.append(error_code)
 
     print("   - Both un-authenticated and authenticated download attempts failed.")
-    return None
+    if "video_unavailable" in error_codes:
+        return None, "video_unavailable"
+    return None, "audio_download_failed"
 
 
 def predict_genre(
@@ -457,11 +476,11 @@ def predict_genre(
         "Punk",
     ]
 
-    audio_path = download_audio_for_analysis(video_id)
+    audio_path, audio_error = download_audio_for_analysis(video_id)
     
     # 1) Refrain from calling AI-API if audio download failed
     if not audio_path:
-        return None, "audio_download_failed"
+        return None, audio_error or "audio_download_failed"
 
     parts = []
 
@@ -592,6 +611,11 @@ def ingest_single_video(
     prediction, error = predict_genre(model, video_id, title, description)
 
     if prediction is None:
+        if error == "video_unavailable":
+            return {
+                "status": "unavailable",
+                "message": "Video is not available for audio download or streaming.",
+            }
         if error == "audio_download_failed":
             return {
                 "status": "error",
