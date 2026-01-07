@@ -816,6 +816,8 @@ def rating_mode():
     user = current_user()
     index_error = None
     unrated_videos = []
+    selected_video = None
+    selected_video_id = (request.args.get("video_id") or "").strip() or None
     videos_left = 0
 
     # Fetch genres and unrated videos in one pass to avoid relying on null field queries.
@@ -832,6 +834,8 @@ def rating_mode():
             rating = extract_user_rating(data, user)
             if rating.get("genre_override"):
                 unique_genres.add(rating.get("genre_override"))
+            if selected_video_id and doc.id == selected_video_id:
+                selected_video = merge_user_rating(data, user)
             if not rating.get("rated_at"):
                 unrated_videos.append(merge_user_rating(data, user))
 
@@ -844,6 +848,11 @@ def rating_mode():
         sorted_genres = []
         unrated_videos = []
         videos_left = 0
+
+    if selected_video_id:
+        if not selected_video:
+            return "Video not found.", 404
+        return render_template('rate.html', video=selected_video, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=videos_left, index_error=index_error)
 
     if not unrated_videos:
         return render_template('rate.html', video=None, genres=sorted_genres, music_ratings=MUSIC_RATINGS, video_ratings=VIDEO_RATINGS, videos_left=0, index_error=index_error)
@@ -1089,6 +1098,81 @@ def admin_mode():
             inactive_days=inactive_days or "",
         )
 
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+
+
+@app.route("/admin/database")
+@requires_auth
+@requires_admin
+def admin_database():
+    """Admin database view with sortable, filterable table."""
+    if not db:
+        return "Error: Firestore client not initialized.", 500
+    user = current_user()
+
+    def serialize_value(value):
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc).strftime("%Y-%m-%d")
+        if value is None:
+            return ""
+        return str(value)
+
+    try:
+        docs = list(db.collection(COLLECTION_NAME).stream())
+        rows = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            rating = extract_user_rating(data, user)
+            genre_override = rating.get("genre_override")
+            genre_original = data.get("genre")
+            genre_override_value = serialize_value(genre_override)
+            genre_original_value = serialize_value(genre_original)
+            normalized_override = genre_override_value.strip().casefold() if genre_override_value else ""
+            normalized_original = genre_original_value.strip().casefold() if genre_original_value else ""
+            genre_overridden = bool(genre_override_value) and normalized_override != normalized_original
+            row = {
+                "video_id": doc.id,
+                "artist": serialize_value(data.get("artist")),
+                "track": serialize_value(data.get("track")),
+                "date_youtube": serialize_value(data.get("date_youtube")),
+                "date_substack": serialize_value(data.get("date_substack")),
+                "date_prism": serialize_value(data.get("date_prism")),
+                "date_rated": serialize_value(rating.get("rated_at")),
+                "source": serialize_value(data.get("source")),
+                "genre": genre_override_value or genre_original_value,
+                "genre_original": genre_original_value,
+                "genre_overridden": genre_overridden,
+                "genre_ai_fidelity": serialize_value(data.get("genre_ai_fidelity")),
+                "genre_ai_remarks": serialize_value(data.get("genre_ai_remarks")),
+                "ai_model": serialize_value(data.get("ai_model")),
+            }
+            filter_parts = [
+                row["video_id"],
+                row["artist"],
+                row["track"],
+                row["date_youtube"],
+                row["date_substack"],
+                row["date_prism"],
+                row["date_rated"],
+                row["source"],
+                row["genre"],
+                row["genre_original"],
+                genre_override_value,
+                row["genre_ai_fidelity"],
+                row["genre_ai_remarks"],
+                row["ai_model"],
+            ]
+            row["filter_text"] = " ".join(part for part in filter_parts if part).lower()
+            rows.append(row)
+
+        return render_template(
+            'admin_database.html',
+            rows=rows,
+            total_entries=len(rows),
+        )
     except Exception as e:
         return f"An error occurred: {e}", 500
 

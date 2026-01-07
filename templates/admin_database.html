@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>prism | database</title>
+</head>
+<body class="full-page">
+
+<div class="page-full page-full--db">
+    <div class="page-header">
+        <div class="logo-wrap logo-wrap--compact">
+            <img class="logo" src="{{ url_for('static', filename='prism_fullsize.png') }}" alt="Logo">
+        </div>
+        <select onchange="window.location.href=this.value" class="nav-select">
+            <option value="{{ url_for('rating_mode') }}">rate</option>
+            <option value="{{ url_for('playing_mode') }}">play</option>
+            <option value="{{ url_for('admin_mode') }}">admin</option>
+            <option value="{{ url_for('admin_database') }}" selected>database</option>
+        </select>
+    </div>
+
+    <h1>Database: musicvideos</h1>
+    <div class="db-controls">
+        <div class="db-filter">
+            <label for="db-filter" class="admin-form-label">Filter:</label>
+            <div class="db-filter-input">
+                <input type="text" id="db-filter" class="admin-field admin-field--wide" placeholder="Type to filter rows">
+                <button type="button" class="db-filter-clear" aria-label="Clear filter" title="Clear filter">x</button>
+            </div>
+        </div>
+        <div class="meta-text" id="db-count">Total entries: {{ total_entries }}</div>
+    </div>
+    <div class="meta-text">Click a column header to sort; click again to reverse.</div>
+
+    <div class="data-table-scrollbar" aria-hidden="true">
+        <div class="data-table-scrollbar__inner"></div>
+    </div>
+    <div class="data-table-wrapper data-table-wrapper--scroll">
+        <table class="data-table data-table--sortable data-table--nowrap" id="db-table">
+            <thead>
+                <tr>
+                    <th class="sortable" aria-sort="none">video_id</th>
+                    <th class="sortable data-table-col-shrink" aria-sort="none">artist</th>
+                    <th class="sortable data-table-col-shrink" aria-sort="none">track</th>
+                    <th class="sortable" aria-sort="none">date_youtube</th>
+                    <th class="sortable" aria-sort="none">date_substack</th>
+                    <th class="sortable" aria-sort="none">date_prism</th>
+                    <th class="sortable" aria-sort="none">date_rated</th>
+                    <th class="sortable" aria-sort="none">source</th>
+                    <th class="sortable" aria-sort="none">genre</th>
+                    <th class="sortable" aria-sort="none">genre_ai_fidelity</th>
+                    <th class="sortable" aria-sort="none">genre_ai_remarks</th>
+                    <th class="sortable" aria-sort="none">ai_model</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr data-filter="{{ row.filter_text }}">
+                    <td data-label="video_id" data-sort="{{ row.video_id }}">
+                        <a href="{{ url_for('rating_mode', video_id=row.video_id) }}">{{ row.video_id }}</a>
+                        <a href="https://www.youtube.com/watch?v={{ row.video_id }}" target="_blank" rel="noopener">(YT)</a>
+                    </td>
+                    <td data-label="artist" data-sort="{{ row.artist }}" class="data-table-col-shrink">
+                        <span class="data-table-text-clip" title="{{ row.artist }}">{{ row.artist }}</span>
+                    </td>
+                    <td data-label="track" data-sort="{{ row.track }}" class="data-table-col-shrink">
+                        <span class="data-table-text-clip" title="{{ row.track }}">{{ row.track }}</span>
+                    </td>
+                    <td data-label="date_youtube" data-sort="{{ row.date_youtube }}">{{ row.date_youtube }}</td>
+                    <td data-label="date_substack" data-sort="{{ row.date_substack }}">{{ row.date_substack }}</td>
+                    <td data-label="date_prism" data-sort="{{ row.date_prism }}">{{ row.date_prism }}</td>
+                    <td data-label="date_rated" data-sort="{{ row.date_rated }}">{{ row.date_rated }}</td>
+                    <td data-label="source" data-sort="{{ row.source }}" class="data-table-cell-wrap">
+                        <span title="{{ row.source }}">{{ row.source[:20] }}</span>
+                    </td>
+                    <td data-label="genre" data-sort="{{ row.genre }}" class="{% if row.genre_overridden %}db-genre-overridden{% endif %}"{% if row.genre_overridden %} title="Original genre: {{ row.genre_original }}"{% elif row.genre %} title="{{ row.genre }}"{% endif %}>{{ row.genre[:11] }}</td>
+                    <td data-label="genre_ai_fidelity" data-sort="{{ row.genre_ai_fidelity }}">{{ row.genre_ai_fidelity }}</td>
+                    <td data-label="genre_ai_remarks" data-sort="{{ row.genre_ai_remarks }}" class="data-table-cell-wrap">
+                        <span title="{{ row.genre_ai_remarks }}">{{ row.genre_ai_remarks[:20] }}</span>
+                    </td>
+                    <td data-label="ai_model" data-sort="{{ row.ai_model }}">{{ row.ai_model }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const table = document.getElementById('db-table');
+        if (!table) {
+            return;
+        }
+
+        const tbody = table.querySelector('tbody');
+        const headers = Array.from(table.querySelectorAll('th.sortable'));
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const tableWrapper = document.querySelector('.data-table-wrapper--scroll');
+        const topScrollbar = document.querySelector('.data-table-scrollbar');
+        const topScrollbarInner = topScrollbar ? topScrollbar.querySelector('.data-table-scrollbar__inner') : null;
+        const filterInput = document.getElementById('db-filter');
+        const clearButton = document.querySelector('.db-filter-clear');
+
+        const numericRegex = /^-?\d+(\.\d+)?$/;
+        let isSyncingScroll = false;
+
+        const getCellValue = (row, index) => {
+            const cell = row.children[index];
+            if (!cell) {
+                return '';
+            }
+            const raw = cell.dataset.sort || cell.textContent || '';
+            return raw.trim();
+        };
+
+        const syncScroll = (source, target) => {
+            if (isSyncingScroll) {
+                return;
+            }
+            isSyncingScroll = true;
+            target.scrollLeft = source.scrollLeft;
+            requestAnimationFrame(() => {
+                isSyncingScroll = false;
+            });
+        };
+
+        const updateScrollbar = () => {
+            if (!tableWrapper || !topScrollbar || !topScrollbarInner) {
+                return;
+            }
+            const wrapperWidth = tableWrapper.clientWidth;
+            table.classList.remove('data-table--compact-cols');
+            const naturalWidth = table.scrollWidth;
+            const shouldCompact = naturalWidth > wrapperWidth;
+            table.classList.toggle('data-table--compact-cols', shouldCompact);
+            const tableWidth = table.scrollWidth;
+            if (tableWidth > wrapperWidth) {
+                topScrollbar.classList.add('is-visible');
+                topScrollbarInner.style.width = `${tableWidth}px`;
+            } else {
+                topScrollbar.classList.remove('is-visible');
+                topScrollbarInner.style.width = '0px';
+                topScrollbar.scrollLeft = 0;
+                tableWrapper.scrollLeft = 0;
+            }
+        };
+
+        const compareRows = (a, b, index, direction) => {
+            const aVal = getCellValue(a, index);
+            const bVal = getCellValue(b, index);
+            const aIsNum = numericRegex.test(aVal);
+            const bIsNum = numericRegex.test(bVal);
+            let result = 0;
+
+            if (aIsNum && bIsNum) {
+                result = parseFloat(aVal) - parseFloat(bVal);
+            } else {
+                result = aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' });
+            }
+
+            return direction === 'asc' ? result : -result;
+        };
+
+        const sortTable = (index, direction) => {
+            rows.sort((a, b) => compareRows(a, b, index, direction));
+            rows.forEach(row => tbody.appendChild(row));
+            updateScrollbar();
+        };
+
+        headers.forEach((header, index) => {
+            header.addEventListener('click', () => {
+                const current = header.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+                headers.forEach(other => {
+                    if (other !== header) {
+                        delete other.dataset.sortDir;
+                        other.setAttribute('aria-sort', 'none');
+                    }
+                });
+                header.dataset.sortDir = current;
+                header.setAttribute('aria-sort', current === 'asc' ? 'ascending' : 'descending');
+                sortTable(index, current);
+            });
+        });
+
+        const applyFilter = () => {
+            const query = filterInput.value.trim().toLowerCase();
+            rows.forEach(row => {
+                const haystack = (row.dataset.filter || row.textContent || '').toLowerCase();
+                row.style.display = haystack.includes(query) ? '' : 'none';
+            });
+            updateScrollbar();
+        };
+
+        const updateClearButton = () => {
+            if (!clearButton) {
+                return;
+            }
+            clearButton.classList.toggle('is-visible', filterInput.value.trim().length > 0);
+        };
+
+        if (filterInput) {
+            filterInput.addEventListener('input', () => {
+                applyFilter();
+                updateClearButton();
+            });
+            updateClearButton();
+        }
+
+        if (filterInput && clearButton) {
+            clearButton.addEventListener('click', () => {
+                filterInput.value = '';
+                applyFilter();
+                updateClearButton();
+                filterInput.focus();
+            });
+        }
+
+        if (tableWrapper && topScrollbar && topScrollbarInner) {
+            tableWrapper.addEventListener('scroll', () => syncScroll(tableWrapper, topScrollbar));
+            topScrollbar.addEventListener('scroll', () => syncScroll(topScrollbar, tableWrapper));
+            window.addEventListener('resize', updateScrollbar);
+            updateScrollbar();
+        }
+    });
+</script>
+
+</body>
+</html>

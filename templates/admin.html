@@ -283,7 +283,7 @@
     {% if is_admin %}
     <h2 class="section-heading">Database</h2>
     <div class="stat-card">
-        <p class="empty-state">(Placeholder for future database management features)</p>
+        <a class="button-link next-button admin-btn" href="{{ url_for('admin_database') }}">load complete database into table</a>
     </div>
     {% endif %}
 
