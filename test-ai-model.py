@@ -304,7 +304,7 @@ def main():
     parser.add_argument("video_id", help="YouTube Video ID")
     parser.add_argument("--project", default="goodmusic-470520", help="Google Cloud Project ID")
     # --- ADDED: Arg for secret name ---
-    parser.add_argument("--secret_name", default="GOOGLE_API_KEY", help="Name of the secret in Secret Manager")
+    parser.add_argument("--secret_name", default="GEMINI_API_KEY", help="Name of the secret in Secret Manager")
     parser.add_argument("--location", default="global", help="Vertex AI Location") # Kept to avoid breaking existing args, though unused for AI Studio
     args = parser.parse_args()
 
@@ -313,7 +313,7 @@ def main():
     print(f"   Location: {args.location}")
 
     # --- CHANGED: API Key Logic (Env -> Secret -> Fail) ---
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
         print(f"   🔑 Env var not found. Fetching secret '{args.secret_name}' from project '{args.project}'...")
@@ -349,11 +349,11 @@ def main():
 
     # Download Audio
     print("   Downloading audio for analysis...")
-    audio_path = download_audio_for_analysis(args.video_id)
+    audio_path, audio_error = download_audio_for_analysis(args.video_id)
     if audio_path:
         print(f"   ✅ Audio downloaded to {audio_path}")
     else:
-        print("   ⚠️ Audio download failed.")
+        print(f"   ⚠️ Audio download failed: {audio_error or 'unknown'}")
 
     print("-" * 60)
     
