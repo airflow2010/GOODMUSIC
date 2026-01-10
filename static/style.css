@@ -112,6 +112,13 @@ a:hover {
     margin-bottom: 20px;
 }
 
+.page-footer {
+    margin-top: 24px;
+    text-align: right;
+    font-size: 0.85em;
+    color: var(--color-text-muted);
+}
+
 .section-heading {
     margin-top: 40px;
 }

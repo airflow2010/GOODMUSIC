@@ -297,6 +297,11 @@
             <a href="https://github.com/airflow2010/GOODMUSIC" target="_blank">GitHub Repo</a>
         </div>
     </div>
+    {% if request_duration_ms is not none %}
+    <div class="page-footer">
+        <span class="meta-text">Request time: {{ request_duration_ms|round(1) }} ms</span>
+    </div>
+    {% endif %}
 </div>
 
 <script>

@@ -5,7 +5,7 @@ import sys
 
 from google.cloud import firestore
 
-from ingestion import init_firestore_db
+from ingestion import init_firestore_db, bump_db_version
 
 COLLECTION_NAME = "musicvideos"
 USERS_COLLECTION = "users"
@@ -33,6 +33,7 @@ def ensure_admin_user(db, user_id: str, auth_provider: str) -> str:
     if auth_provider == "google":
         data["email"] = user_id
     doc_ref.set(data, merge=True)
+    bump_db_version(db)
     return rating_key
 
 
@@ -130,12 +131,13 @@ def main():
                 removed_legacy += 1
         else:
             if rating_key in ratings:
-                if updates:
-                    if args.dry_run:
-                        print(f"[dry-run] update rand for {doc.id}")
-                    else:
-                        doc.reference.update(updates)
-                    updated_rand += 1
+            if updates:
+                if args.dry_run:
+                    print(f"[dry-run] update rand for {doc.id}")
+                else:
+                    doc.reference.update(updates)
+                    bump_db_version(db)
+                updated_rand += 1
                 skipped += 1
                 continue
 
@@ -150,6 +152,7 @@ def main():
                 print(f"[dry-run] update {doc.id}: {list(updates.keys())}")
             else:
                 doc.reference.update(updates)
+                bump_db_version(db)
                 if "rand" in updates:
                     updated_rand += 1
 

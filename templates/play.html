@@ -207,6 +207,11 @@
         <h1>No videos match your filter criteria!</h1>
         <p>Try adjusting the filters above.</p>
     {% endif %}
+    {% if request_duration_ms is not none %}
+    <div class="page-footer">
+        <span class="meta-text">Request time: {{ request_duration_ms|round(1) }} ms</span>
+    </div>
+    {% endif %}
 </div>
 
 <script>

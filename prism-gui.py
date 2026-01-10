@@ -6,6 +6,7 @@ import sys
 import subprocess
 import random
 import time
+import threading
 from functools import wraps
 from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qs, urlparse
@@ -19,7 +20,17 @@ from google.cloud import firestore
 from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
 import re
-from ingestion import fetch_playlist_video_ids, get_youtube_service as ingestion_get_youtube_service, ingest_single_video, init_ai_model, init_firestore_db, AI_MODEL_NAME, get_gcp_secret
+from ingestion import (
+    fetch_playlist_video_ids,
+    get_youtube_service as ingestion_get_youtube_service,
+    ingest_single_video,
+    init_ai_model,
+    init_firestore_db,
+    AI_MODEL_NAME,
+    get_gcp_secret,
+    read_db_version,
+    bump_db_version,
+)
 
 load_dotenv()
 
@@ -37,6 +48,18 @@ MAX_IMPORT_NOTES_LEN = 500
 MAX_IMPORT_VIDEO_IDS = 50
 
 RATE_LIMIT_BUCKETS = {}
+
+CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
+CACHE_VERSION_CHECK_SECONDS = int(os.environ.get("CACHE_VERSION_CHECK_SECONDS", "5"))
+MUSICVIDEOS_CACHE = {
+    "videos": None,
+    "by_id": {},
+    "base_genres": set(),
+    "loaded_at": 0.0,
+    "version": None,
+    "last_version_check": 0.0,
+}
+CACHE_LOCK = threading.Lock()
 
 # --- Google OAuth Configuration (will be set later by reading client_secret.json)---
 GOOGLE_CLIENT_ID = None
@@ -210,7 +233,125 @@ def rate_limit_hit(key: str) -> None:
     bucket = RATE_LIMIT_BUCKETS.setdefault(key, [])
     bucket.append(time.time())
 
+def _normalize_cache_timestamp(value):
+    if value is firestore.SERVER_TIMESTAMP:
+        return datetime.now(timezone.utc)
+    return value
 
+def refresh_musicvideos_cache(db, version: Optional[int] = None):
+    if not db:
+        return MUSICVIDEOS_CACHE
+    try:
+        docs = db.collection(COLLECTION_NAME).stream()
+        videos = []
+        by_id = {}
+        base_genres = set()
+        for doc in docs:
+            if not doc.exists:
+                continue
+            data = doc.to_dict() or {}
+            data["video_id"] = doc.id
+            videos.append(data)
+            by_id[doc.id] = data
+            if data.get("genre"):
+                base_genres.add(data.get("genre"))
+    except Exception as e:
+        print(f"⚠️  Failed to refresh cache: {e}")
+        return MUSICVIDEOS_CACHE
+
+    if version is None:
+        version = read_db_version(db)
+    now = time.time()
+    with CACHE_LOCK:
+        MUSICVIDEOS_CACHE["videos"] = videos
+        MUSICVIDEOS_CACHE["by_id"] = by_id
+        MUSICVIDEOS_CACHE["base_genres"] = base_genres
+        MUSICVIDEOS_CACHE["loaded_at"] = now
+        MUSICVIDEOS_CACHE["version"] = version
+        MUSICVIDEOS_CACHE["last_version_check"] = now
+    return MUSICVIDEOS_CACHE
+
+def ensure_musicvideos_cache(db, force_reload: bool = False):
+    if not db:
+        return MUSICVIDEOS_CACHE
+    now = time.time()
+    if force_reload or MUSICVIDEOS_CACHE["videos"] is None:
+        return refresh_musicvideos_cache(db)
+    if now - MUSICVIDEOS_CACHE["loaded_at"] > CACHE_TTL_SECONDS:
+        return refresh_musicvideos_cache(db)
+    if now - MUSICVIDEOS_CACHE["last_version_check"] > CACHE_VERSION_CHECK_SECONDS:
+        version = read_db_version(db)
+        with CACHE_LOCK:
+            MUSICVIDEOS_CACHE["last_version_check"] = now
+        if MUSICVIDEOS_CACHE["version"] != version:
+            return refresh_musicvideos_cache(db, version=version)
+        with CACHE_LOCK:
+            MUSICVIDEOS_CACHE["version"] = version
+    return MUSICVIDEOS_CACHE
+
+def set_cache_version(new_version: Optional[int]) -> None:
+    if new_version is None:
+        return
+    with CACHE_LOCK:
+        MUSICVIDEOS_CACHE["version"] = new_version
+        MUSICVIDEOS_CACHE["last_version_check"] = time.time()
+
+def apply_rating_to_cache(db, video_id: str, user: dict, rating_data: dict) -> None:
+    if not db:
+        return
+    cache = ensure_musicvideos_cache(db)
+    if not cache.get("by_id"):
+        return
+    rating_key = user.get("rating_key")
+    if not rating_key:
+        return
+    with CACHE_LOCK:
+        video = cache["by_id"].get(video_id)
+        if not video:
+            return
+        ratings = video.get("ratings") or {}
+        existing = ratings.get(rating_key, {})
+        merged = dict(existing)
+        now = datetime.now(timezone.utc)
+        for key, value in rating_data.items():
+            if value is firestore.SERVER_TIMESTAMP:
+                value = now
+            merged[key] = value
+        ratings[rating_key] = merged
+        video["ratings"] = ratings
+
+def apply_new_video_to_cache(db, video_id: str, data: dict) -> None:
+    if not db or not data:
+        return
+    cache = ensure_musicvideos_cache(db)
+    if cache.get("videos") is None:
+        return
+    cache_data = dict(data)
+    cache_data["video_id"] = video_id
+    cache_data["date_prism"] = _normalize_cache_timestamp(cache_data.get("date_prism"))
+    with CACHE_LOCK:
+        if video_id in cache["by_id"]:
+            cache["by_id"][video_id].update(cache_data)
+        else:
+            cache["videos"].append(cache_data)
+            cache["by_id"][video_id] = cache_data
+        if cache_data.get("genre"):
+            base_genres = cache.get("base_genres") or set()
+            base_genres.add(cache_data.get("genre"))
+            cache["base_genres"] = base_genres
+
+def collect_genres_for_user(videos: list, user: dict, base_genres: Optional[set] = None) -> list:
+    unique_genres = set(base_genres or [])
+    for video_data in videos:
+        rating = extract_user_rating(video_data, user)
+        if rating.get("genre_override"):
+            unique_genres.add(rating.get("genre_override"))
+    unique_genres.discard("Unknown")
+    return sorted(unique_genres)
+
+def get_cached_video(db, video_id: str) -> Optional[dict]:
+    cache = ensure_musicvideos_cache(db)
+    return cache.get("by_id", {}).get(video_id)
 
 def rating_key_for_user_id(user_id: str) -> str:
     token = base64.urlsafe_b64encode(user_id.encode("utf-8")).decode("ascii").rstrip("=")
@@ -251,6 +392,7 @@ def ensure_user_record(
     if not doc.exists:
         update["created_at"] = firestore.SERVER_TIMESTAMP
     doc_ref.set(update, merge=True)
+    set_cache_version(bump_db_version(db))
     data.update(update)
     return data
 
@@ -261,6 +403,7 @@ def build_user_context(user_id: str, auth_provider: str, user_doc: Optional[dict
     rating_key = (user_doc or {}).get("rating_key") or rating_key_for_user_id(user_id)
     if user_doc is not None and not user_doc.get("rating_key") and db:
         db.collection(USERS_COLLECTION).document(user_id).set({"rating_key": rating_key}, merge=True)
+        set_cache_version(bump_db_version(db))
     role = (user_doc or {}).get("role") or default_role
     return {"id": user_id, "role": role, "auth_provider": auth_provider, "rating_key": rating_key}
 
@@ -365,6 +508,7 @@ def touch_user_activity(user: dict) -> None:
             {"last_seen_at": firestore.SERVER_TIMESTAMP},
             merge=True,
         )
+        set_cache_version(bump_db_version(db))
         session[session_key] = now.isoformat()
     except Exception as e:
         print(f"⚠️  Failed to update user activity: {e}")
@@ -399,6 +543,10 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 if os.environ.get("K_SERVICE") or os.environ.get("FORCE_HTTPS") == "1":
     app.config["SESSION_COOKIE_SECURE"] = True
 
+@app.before_request
+def start_request_timer():
+    g.request_start = time.perf_counter()
+
 # --- OAuth Initialization ---
 oauth = OAuth(app)
 google = None
@@ -415,6 +563,14 @@ if AUTH_GOOGLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
 @app.context_processor
 def inject_csrf_token():
     return {"csrf_token": get_csrf_token()}
+
+@app.context_processor
+def inject_request_timing():
+    start = getattr(g, "request_start", None)
+    if start is None:
+        return {}
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    return {"request_duration_ms": elapsed_ms}
 
 # Verify collection access
 if db:
@@ -540,23 +696,35 @@ def delete_user_and_ratings(user_id: str) -> dict:
     batch = db.batch()
     pending = 0
     removed = 0
-    docs = db.collection(COLLECTION_NAME).stream()
-    for doc in docs:
-        data = doc.to_dict() or {}
+    cache = ensure_musicvideos_cache(db)
+    videos = cache.get("videos") or []
+    for data in videos:
+        if not data:
+            continue
+        video_id = data.get("video_id")
+        if not video_id:
+            continue
         ratings = data.get("ratings") or {}
         if rating_key not in ratings:
             continue
-        batch.update(doc.reference, {f"ratings.{rating_key}": firestore.DELETE_FIELD})
+        doc_ref = db.collection(COLLECTION_NAME).document(video_id)
+        batch.update(doc_ref, {f"ratings.{rating_key}": firestore.DELETE_FIELD})
+        with CACHE_LOCK:
+            ratings.pop(rating_key, None)
+            data["ratings"] = ratings
         pending += 1
         removed += 1
         if pending >= 400:
             batch.commit()
+            set_cache_version(bump_db_version(db))
             batch = db.batch()
             pending = 0
     if pending:
         batch.commit()
+        set_cache_version(bump_db_version(db))
 
     db.collection(USERS_COLLECTION).document(user_id).delete()
+    set_cache_version(bump_db_version(db))
     return {"deleted": True, "ratings_removed": removed}
 
 def coerce_int(value, default):
@@ -603,11 +771,9 @@ def merge_user_rating(video_data: dict, user: dict) -> dict:
     return merged
 
 
-def build_rating_update(doc_ref, user: dict, form) -> dict:
-    doc = doc_ref.get()
-    if not doc.exists:
+def build_rating_update(video_data: dict, user: dict, form) -> dict:
+    if not video_data:
         raise ValueError("Video not found.")
-    video_data = doc.to_dict() or {}
     existing_rating = extract_user_rating(video_data, user)
 
     base_genre = (video_data.get("genre") or "").strip()
@@ -631,14 +797,16 @@ def build_rating_update(doc_ref, user: dict, form) -> dict:
     return rating_data
 
 
-def get_filtered_videos_list(db, filters, user):
+def get_filtered_videos_list(db, filters, user, videos: Optional[list] = None):
     """Reusable function to filter videos based on user-specific criteria."""
     try:
         candidate_videos = []
-        docs = db.collection(COLLECTION_NAME).stream()
-        for doc in docs:
-            video_data = doc.to_dict() or {}
-            video_data["video_id"] = doc.id
+        if videos is None:
+            cache = ensure_musicvideos_cache(db)
+            videos = cache.get("videos") or []
+        for video_data in videos:
+            if not video_data:
+                continue
             rating = extract_user_rating(video_data, user)
             rated_at = rating.get("rated_at")
             rating_music = coerce_int(rating.get("rating_music", 3), 3)
@@ -820,21 +988,19 @@ def rating_mode():
     selected_video_id = (request.args.get("video_id") or "").strip() or None
     videos_left = 0
 
-    # Fetch genres and unrated videos in one pass to avoid relying on null field queries.
+    # Fetch genres and unrated videos in one pass using the cache.
     try:
-        docs = db.collection(COLLECTION_NAME).get()
-        unique_genres = set()
-        for doc in docs:
-            if not doc.exists:
+        cache = ensure_musicvideos_cache(db)
+        videos = cache.get("videos") or []
+        base_genres = cache.get("base_genres") or set()
+        unique_genres = set(base_genres)
+        for data in videos:
+            if not data:
                 continue
-            data = doc.to_dict() or {}
-            data["video_id"] = doc.id
-            if genre := data.get("genre"):
-                unique_genres.add(genre)
             rating = extract_user_rating(data, user)
             if rating.get("genre_override"):
                 unique_genres.add(rating.get("genre_override"))
-            if selected_video_id and doc.id == selected_video_id:
+            if selected_video_id and data.get("video_id") == selected_video_id:
                 selected_video = merge_user_rating(data, user)
             if not rating.get("rated_at"):
                 unrated_videos.append(merge_user_rating(data, user))
@@ -901,7 +1067,9 @@ def playing_mode():
         'exclude_rejected': exclude_rejected,
     }
 
-    filtered_videos, index_error = get_filtered_videos_list(db, current_filters, user)
+    cache = ensure_musicvideos_cache(db)
+    cached_videos = cache.get("videos") or []
+    filtered_videos, index_error = get_filtered_videos_list(db, current_filters, user, videos=cached_videos)
 
     videos_count = len(filtered_videos)
 
@@ -918,19 +1086,8 @@ def playing_mode():
 
     # --- Fetch All Genres for Dropdowns ---
     try:
-        docs = db.collection(COLLECTION_NAME).get()
-        unique_genres = set()
-        for doc in docs:
-            if not doc.exists:
-                continue
-            data = doc.to_dict() or {}
-            if data.get("genre"):
-                unique_genres.add(data.get("genre"))
-            rating = extract_user_rating(data, user)
-            if rating.get("genre_override"):
-                unique_genres.add(rating.get("genre_override"))
-        unique_genres.discard("Unknown")
-        sorted_genres = sorted(list(unique_genres))
+        base_genres = cache.get("base_genres") or set()
+        sorted_genres = collect_genres_for_user(cached_videos, user, base_genres)
     except Exception as e:
         print(f"An error occurred while fetching genres: {e}")
         sorted_genres = []
@@ -964,18 +1121,17 @@ def admin_mode():
     is_admin = user.get("role") == "admin"
 
     try:
-        # Fetch all documents to calculate stats
-        # Note: For very large collections, this might be slow and expensive.
-        docs = list(db.collection(COLLECTION_NAME).stream())
-        total_entries = len(docs)
+        # Fetch all documents from cache to calculate stats.
+        cache = ensure_musicvideos_cache(db)
+        videos = cache.get("videos") or []
+        total_entries = len(videos)
 
         rated_count = 0
         favorite_count = 0
         rejected_count = 0
         genre_counts = {}
 
-        for doc in docs:
-            data = doc.to_dict()
+        for data in videos:
             if not data:
                 continue
 
@@ -1043,7 +1199,7 @@ def admin_mode():
             try:
                 now = datetime.now(timezone.utc)
                 # Get all videos to count ratings per user
-                video_docs = list(db.collection(COLLECTION_NAME).stream())
+                video_docs = videos
 
                 for doc in db.collection(USERS_COLLECTION).stream():
                     data = doc.to_dict() or {}
@@ -1058,8 +1214,7 @@ def admin_mode():
                     # Create user object with rating_key for extract_user_rating
                     user_rating_key = data.get("rating_key") or rating_key_for_user_id(user_id)
                     user_obj = {"id": user_id, "rating_key": user_rating_key, "role": data.get("role") or "user"}
-                    for video_doc in video_docs:
-                        video_data = video_doc.to_dict()
+                    for video_data in video_docs:
                         if not video_data:
                             continue
                         rating = extract_user_rating(video_data, user_obj)
@@ -1121,10 +1276,10 @@ def admin_database():
         return str(value)
 
     try:
-        docs = list(db.collection(COLLECTION_NAME).stream())
+        cache = ensure_musicvideos_cache(db)
+        videos = cache.get("videos") or []
         rows = []
-        for doc in docs:
-            data = doc.to_dict() or {}
+        for data in videos:
             rating = extract_user_rating(data, user)
             genre_override = rating.get("genre_override")
             genre_original = data.get("genre")
@@ -1134,7 +1289,7 @@ def admin_database():
             normalized_original = genre_original_value.strip().casefold() if genre_original_value else ""
             genre_overridden = bool(genre_override_value) and normalized_override != normalized_original
             row = {
-                "video_id": doc.id,
+                "video_id": data.get("video_id"),
                 "artist": serialize_value(data.get("artist")),
                 "track": serialize_value(data.get("track")),
                 "date_youtube": serialize_value(data.get("date_youtube")),
@@ -1246,6 +1401,7 @@ def request_import():
     }
     try:
         db.collection(IMPORT_REQUESTS_COLLECTION).add(data)
+        set_cache_version(bump_db_version(db))
     except Exception as e:
         return f"An error occurred: {e}", 500
 
@@ -1272,6 +1428,7 @@ def update_import_request(request_id):
             "processed_by": user.get("id"),
             "processed_at": firestore.SERVER_TIMESTAMP,
         })
+        set_cache_version(bump_db_version(db))
     except Exception as e:
         return f"An error occurred: {e}", 500
 
@@ -1396,9 +1553,13 @@ def save_rating(video_id):
 
     try:
         user = current_user()
+        cache = ensure_musicvideos_cache(db)
+        video_data = cache.get("by_id", {}).get(video_id)
+        rating_data = build_rating_update(video_data, user, request.form)
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
-        rating_data = build_rating_update(doc_ref, user, request.form)
         doc_ref.update({f"ratings.{user.get('rating_key')}": rating_data})
+        apply_rating_to_cache(db, video_id, user, rating_data)
+        set_cache_version(bump_db_version(db))
 
     except Exception as e:
         return f"An error occurred: {e}", 500
@@ -1419,9 +1580,13 @@ def save_play_rating(video_id):
 
     try:
         user = current_user()
+        cache = ensure_musicvideos_cache(db)
+        video_data = cache.get("by_id", {}).get(video_id)
+        rating_data = build_rating_update(video_data, user, request.form)
         doc_ref = db.collection(COLLECTION_NAME).document(video_id)
-        rating_data = build_rating_update(doc_ref, user, request.form)
         doc_ref.update({f"ratings.{user.get('rating_key')}": rating_data})
+        apply_rating_to_cache(db, video_id, user, rating_data)
+        set_cache_version(bump_db_version(db))
     except Exception as e:
         return f"An error occurred: {e}", 500
 
@@ -1599,6 +1764,8 @@ def import_playlist():
             title = result.get("title") or ""
             if status == "added":
                 added += 1
+                apply_new_video_to_cache(db, vid, result.get("data"))
+                set_cache_version(result.get("version"))
                 yield f"[{idx}/{total}] ✅ Added {vid} {title}\n"
             elif status == "exists":
                 exists += 1
@@ -1658,6 +1825,8 @@ def import_video():
             title = result.get("title") or ""
             if status == "added":
                 added += 1
+                apply_new_video_to_cache(db, vid, result.get("data"))
+                set_cache_version(result.get("version"))
                 yield f"[{idx}/{total}] ✅ Added {vid} {title}\n"
             elif status == "exists":
                 exists += 1

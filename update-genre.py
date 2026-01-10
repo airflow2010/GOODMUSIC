@@ -9,6 +9,7 @@ from google.cloud import firestore
 from ingestion import (
     AI_MODEL_NAME,
     COLLECTION_NAME,
+    bump_db_version,
     get_video_metadata,
     get_youtube_service,
     init_ai_model,
@@ -161,6 +162,7 @@ def main():
         if updates:
             try:
                 doc_ref.update(updates)
+                bump_db_version(db)
                 print(f"   💾 Document {video_id} updated successfully.")
             except Exception as e:
                 print(f"   ❌ Failed to update document {video_id}: {e}", file=sys.stderr)

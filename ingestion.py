@@ -26,6 +26,8 @@ COLLECTION_NAME = "musicvideos"
 TOKEN_FILE = "token.pickle"
 CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
+APP_STATE_COLLECTION = "app_state"
+APP_STATE_DOC = "db_version"
 
 # Centralized AI Model Configuration
 AI_MODEL_NAME = "gemini-3-flash-preview"
@@ -97,6 +99,54 @@ def init_firestore_db(project_id: Optional[str] = None) -> Optional[firestore.Cl
         return firestore.Client(project=final_project_id, credentials=creds)
     except Exception as e:
         print(f"⚠️  Firestore Init Error: {e}")
+        return None
+
+def _get_app_state_ref(db: firestore.Client):
+    return db.collection(APP_STATE_COLLECTION).document(APP_STATE_DOC)
+
+def read_db_version(db: firestore.Client, create_if_missing: bool = True) -> int:
+    """Reads the global DB version used to invalidate caches."""
+    doc_ref = _get_app_state_ref(db)
+    doc = doc_ref.get()
+    if doc.exists:
+        data = doc.to_dict() or {}
+        try:
+            return int(data.get("version") or 0)
+        except (TypeError, ValueError):
+            return 0
+    if create_if_missing:
+        doc_ref.set({"version": 1, "updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+        return 1
+    return 0
+
+def bump_db_version(db: firestore.Client) -> Optional[int]:
+    """Atomically increments the global DB version and returns the new value."""
+    if not db:
+        return None
+    doc_ref = _get_app_state_ref(db)
+
+    @firestore.transactional
+    def _bump(transaction):
+        snapshot = doc_ref.get(transaction=transaction)
+        current = 0
+        if snapshot.exists:
+            data = snapshot.to_dict() or {}
+            try:
+                current = int(data.get("version") or 0)
+            except (TypeError, ValueError):
+                current = 0
+        new_version = current + 1
+        transaction.set(
+            doc_ref,
+            {"version": new_version, "updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        )
+        return new_version
+
+    try:
+        return _bump(db.transaction())
+    except Exception as e:
+        print(f"⚠️  Failed to bump DB version: {e}")
         return None
 
 def parse_datetime(value: str | None) -> datetime | None:
@@ -648,7 +698,14 @@ def ingest_single_video(
 
     try:
         doc_ref.set(data)
-        return {"status": "added", "message": "Inserted", "title": title}
+        new_version = bump_db_version(db)
+        return {
+            "status": "added",
+            "message": "Inserted",
+            "title": title,
+            "data": data,
+            "version": new_version,
+        }
     except Exception as e:
         return {"status": "error", "message": f"Write failed: {e}"}
 

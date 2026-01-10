@@ -7,7 +7,7 @@ import google.auth
 from google.cloud import firestore
 from google.genai import types
 from pydantic import BaseModel, Field
-from ingestion import init_ai_model, init_firestore_db, AI_MODEL_NAME
+from ingestion import init_ai_model, init_firestore_db, AI_MODEL_NAME, bump_db_version
 
 # ====== Configuration ======
 COLLECTION_NAME = "musicvideos"
@@ -143,6 +143,7 @@ def main():
         if updates:
             try:
                 db.collection(COLLECTION_NAME).document(video_id).update(updates)
+                bump_db_version(db)
                 print("   ✅ Document updated successfully.")
                 count_updated += 1
             except Exception as e:

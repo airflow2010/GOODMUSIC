@@ -107,6 +107,11 @@
         <h1>No unrated videos found!</h1>
         <p>Run the scraping script to add more videos to the database.</p>
     {% endif %}
+    {% if request_duration_ms is not none %}
+    <div class="page-footer">
+        <span class="meta-text">Request time: {{ request_duration_ms|round(1) }} ms</span>
+    </div>
+    {% endif %}
 </div>
 
 <script>
