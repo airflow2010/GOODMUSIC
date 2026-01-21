@@ -175,6 +175,33 @@ def check_prerequisites():
             print("   Install Node.js 20+ and ensure it is on PATH.")
         sys.exit(1)
 
+    # If cookies.txt is provided, verify it can access an age-gated video.
+    if os.path.exists("cookies.txt"):
+        try:
+            import yt_dlp
+        except Exception as e:
+            print(f"⚠️  Warning: Unable to import yt-dlp for cookie validation: {e}")
+        else:
+            test_video_id = os.environ.get("YOUTUBE_COOKIE_TEST_VIDEO_ID", "BgK_Er7WZVg")
+            test_url = f"https://www.youtube.com/watch?v={test_video_id}"
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "cookiefile": "cookies.txt",
+                "socket_timeout": 10,
+                "js_runtimes": {"node": {}},
+                "remote_components": ["ejs:github"],
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.extract_info(test_url, download=False)
+                print(f"✅ cookies.txt validated for age-restricted access (video {test_video_id}).")
+            except Exception as e:
+                print("⚠️  Warning: cookies.txt present but could not validate age-restricted access.")
+                print(f"   Details: {e}")
+                print("   You may need to refresh cookies or verify the account.")
+
     if AUTH_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
         print("\n⚠️  WARNING: AUTH_GOOGLE is set, but client_secret.json is missing or invalid.")
         print(f"   Expected file at: {CLIENT_SECRET_FILE}")
