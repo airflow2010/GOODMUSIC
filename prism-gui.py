@@ -146,6 +146,35 @@ def check_prerequisites():
             print("   Ensure you have a .env file or exported environment variables.")
         sys.exit(1)
 
+    # Node.js is required for yt-dlp JS challenge solving (age-restricted videos).
+    try:
+        node_result = subprocess.run(
+            ["node", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        node_version_text = (node_result.stdout or node_result.stderr or "").strip()
+    except FileNotFoundError:
+        node_version_text = ""
+
+    node_version_match = re.match(r"v?(\d+)\.(\d+)\.(\d+)", node_version_text)
+    node_major = int(node_version_match.group(1)) if node_version_match else 0
+    if node_major < 20:
+        print("\n" + "!" * 60)
+        print("❌ STARTUP ERROR: Node.js 20+ is required for yt-dlp JS challenge solving.")
+        print("!" * 60)
+        if node_version_text:
+            print(f"Detected Node.js version: {node_version_text}")
+        else:
+            print("Node.js was not found on PATH.")
+        if os.environ.get("K_SERVICE"):
+            print("   You appear to be running on Google Cloud Run.")
+            print("   Ensure the container image installs Node.js 20+.")
+        else:
+            print("   Install Node.js 20+ and ensure it is on PATH.")
+        sys.exit(1)
+
     if AUTH_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
         print("\n⚠️  WARNING: AUTH_GOOGLE is set, but client_secret.json is missing or invalid.")
         print(f"   Expected file at: {CLIENT_SECRET_FILE}")

@@ -362,6 +362,12 @@ def is_video_unavailable_error(error_text: str) -> bool:
 
 def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], Optional[str]]:
     """A single download attempt, with or without cookies. Returns (path, error_code)."""
+    # Enable JS challenge solving for YouTube (requires Node + EJS remote components).
+    js_runtime_opts = {
+        "js_runtimes": {"node": {}},
+        "remote_components": ["ejs:github"],
+    }
+
     # The final file will be .m4a after conversion
     target_m4a_path = f"/tmp/{video_id}.m4a"
     has_ffmpeg = shutil.which("ffmpeg") is not None
@@ -372,6 +378,7 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
         "no_warnings": True,
         "noplaylist": True,
     }
+    info_opts.update(js_runtime_opts)
     if use_cookies and os.path.exists("cookies.txt"):
         info_opts["cookiefile"] = "cookies.txt"
         print(f"     - ℹ️  Using cookies from {os.path.abspath('cookies.txt')}")
@@ -412,6 +419,7 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
         "noplaylist": True,
         "max_filesize": 100 * 1024 * 1024,
     }
+    ydl_opts.update(js_runtime_opts)
 
     if has_ffmpeg:
         ydl_opts["postprocessors"] = [
