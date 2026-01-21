@@ -28,6 +28,7 @@ CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 APP_STATE_COLLECTION = "app_state"
 APP_STATE_DOC = "db_version"
+DEFAULT_GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 
 # Centralized AI Model Configuration
 AI_MODEL_NAME = "gemini-3-flash-preview"
@@ -38,6 +39,25 @@ class MusicAnalysis(BaseModel):
     remarks: str = Field(description="Give reasoning (2 sentences) for the classification. More specific genres than the ones allowed for classification may be mentioned in the reasoning.")
     artist: str = Field(description="The name of the artist, or empty string if unknown.")
     track: str = Field(description="The name of the track, or empty string if unknown.")
+
+def resolve_project_id(explicit_project_id: Optional[str] = None, adc_project_id: Optional[str] = None) -> Optional[str]:
+    if explicit_project_id:
+        return explicit_project_id
+    env_project_id = (
+        os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("GCP_PROJECT")
+        or os.environ.get("GCLOUD_PROJECT")
+    )
+    if env_project_id:
+        return env_project_id
+    if adc_project_id is not None:
+        return adc_project_id
+    try:
+        _, detected_project_id = google.auth.default(scopes=DEFAULT_GCP_SCOPES)
+    except Exception as e:
+        print(f"Warning: Could not determine Google Cloud project ID: {e}")
+        return None
+    return detected_project_id
 
 def get_gcp_secret(secret_id: str, project_id: str, version_id: str = "latest") -> Optional[str]:
     """
@@ -65,13 +85,17 @@ def update_gcp_secret(secret_id: str, project_id: str, content_str: str) -> bool
         print(f"⚠️  Could not update secret '{secret_id}': {e}")
         return False
 
-def init_ai_model(project_id: str, location: str = "europe-west4", credentials=None):
+def init_ai_model(project_id: Optional[str] = None, location: str = "europe-west4", credentials=None):
     """Initializes and returns the GenAI client using API Key (Env or Secret Manager)."""
     api_key = os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
-        print(f"   🔑 Env var not found. Fetching secret 'GEMINI_API_KEY' from project '{project_id}'...")
-        api_key = get_gcp_secret("GEMINI_API_KEY", project_id)
+        resolved_project_id = resolve_project_id(project_id)
+        if not resolved_project_id:
+            print("Warning: GEMINI_API_KEY not found and project ID could not be resolved for Secret Manager.")
+            return None
+        print(f"   🔑 Env var not found. Fetching secret 'GEMINI_API_KEY' from project '{resolved_project_id}'...")
+        api_key = get_gcp_secret("GEMINI_API_KEY", resolved_project_id)
 
     if not api_key:
         print("⚠️  Error: Could not find API Key in environment or Secret Manager.")
@@ -87,10 +111,10 @@ def init_firestore_db(project_id: Optional[str] = None) -> Optional[firestore.Cl
     """Initializes and returns the Firestore Client using ADC."""
     try:
         # Get default credentials
-        creds, calculated_project_id = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds, adc_project_id = google.auth.default(scopes=DEFAULT_GCP_SCOPES)
         
         # Determine final project ID: Argument > Env Var > ADC Default
-        final_project_id = project_id or os.environ.get("PROJECT_ID") or calculated_project_id
+        final_project_id = resolve_project_id(project_id, adc_project_id)
         
         if not final_project_id:
             print("⚠️  Error: Could not determine Google Cloud Project ID.")
@@ -166,8 +190,8 @@ def parse_datetime(value: str | None) -> datetime | None:
 def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str = CLIENT_SECRETS_FILE):
     """Gets an authenticated YouTube service using the local token file."""
     creds = None
-    project_id = os.environ.get("PROJECT_ID")
     secret_name = "YOUTUBE_TOKEN_PICKLE"
+    project_id = None
     
     # 1. Try to load from local file
     creds = None
@@ -176,17 +200,19 @@ def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str =
             creds = pickle.load(token)
 
     # 2. If no local file, try to load from Secret Manager (Cloud Context)
-    if not creds and project_id:
-        secret_data = get_gcp_secret(secret_name, project_id)
-        if secret_data:
-            try:
-                decoded = base64.b64decode(secret_data)
-                creds = pickle.loads(decoded)
-                # Save locally so we don't hit the API on every function call
-                with open(token_file, "wb") as token:
-                    pickle.dump(creds, token)
-            except Exception as e:
-                print(f"⚠️  Error loading credentials from secret: {e}")
+    if not creds:
+        project_id = resolve_project_id()
+        if project_id:
+            secret_data = get_gcp_secret(secret_name, project_id)
+            if secret_data:
+                try:
+                    decoded = base64.b64decode(secret_data)
+                    creds = pickle.loads(decoded)
+                    # Save locally so we don't hit the API on every function call
+                    with open(token_file, "wb") as token:
+                        pickle.dump(creds, token)
+                except Exception as e:
+                    print(f"⚠️  Error loading credentials from secret: {e}")
 
     # 3. Refresh or Login if needed
     if not creds or not creds.valid:
@@ -201,6 +227,7 @@ def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str =
             if not os.path.exists(client_secrets_file):
                 # Try fetching from Secret Manager
                 print(f"ℹ️  '{client_secrets_file}' not found. Checking Secret Manager for 'CLIENT_SECRET_JSON'...")
+                project_id = project_id or resolve_project_id()
                 secret_content = get_gcp_secret("CLIENT_SECRET_JSON", project_id) if project_id else None
                 
                 if secret_content:
@@ -229,6 +256,7 @@ def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str =
         
         # If we have a project ID and just generated/refreshed a token, upload it.
         # We check for InstalledAppFlow usage implicitly or just upload on any save to be safe.
+        project_id = project_id or resolve_project_id()
         if project_id:
             print(f"🔄 Syncing new token to Secret Manager ({secret_name})...")
             b64_creds = base64.b64encode(pickle.dumps(creds)).decode()

@@ -74,7 +74,6 @@ Due to the nature of this project several configuration steps are needed. Here i
 
 | name                 | note                                                         | local-run    | cloud-run      |
 | -------------------- | ------------------------------------------------------------ | ------------ | -------------- |
-| PROJECT_ID           | env-var with your Google Cloud project ID                    | .env         | Secret Manager |
 | AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
 | AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
 | AUTH_GOOGLE          | admin email (enables Google login; additional users via users collection) | .env | Secret Manager |
@@ -84,6 +83,10 @@ Due to the nature of this project several configuration steps are needed. Here i
 | FLASK_SECRET_KEY     | env-var with a random, stable value used to sign sessions    | .env         | Secret Manager |
 
 #### preparations for all installations
+
+Before anything else, make sure ADC can resolve your default project (one-time setup):
+1. `gcloud config set project <PROJECT_ID>`
+2. If running locally, also run `gcloud auth application-default login` (Cloud Run provides ADC automatically).
 
 You must create credentials for our app to authenticate against the YouTube API:
 
@@ -125,14 +128,14 @@ The easiest way to get going is just to create an .env file in the project root 
 AUTH_USERNAME="<username>"
 AUTH_PASSWORD="<password>"
 AUTH_GOOGLE="<email-of-authorized-user>"
-PROJECT_ID="<project-id>"
 GEMINI_API_KEY="<api-key>"
 FLASK_SECRET_KEY="<random-stable-secret>"
 ```
 
-Also, for creating local Application Default Credentials (ADC), it is needed that you run this command once:
+Also, for creating local Application Default Credentials (ADC), set your default project and run:
 
 ```bash
+gcloud config set project <PROJECT_ID>
 gcloud auth application-default login
 ```
 
@@ -152,7 +155,6 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    printf "your-username" | gcloud secrets create AUTH_USERNAME --data-file=-
    printf "your-password" | gcloud secrets create AUTH_PASSWORD --data-file=-
    printf "email-of-authorized-user" | gcloud secrets create AUTH_GOOGLE --data-file=-
-   printf "your-project-id" | gcloud secrets create PROJECT_ID --data-file=-
    printf "your-random-stable-secret" | gcloud secrets create FLASK_SECRET_KEY --data-file=-
    ```
 
@@ -306,7 +308,7 @@ python scrape_to_firestore.py
   --limit-new-db-entries: Limits the number of new videos added to Firestore in this run. Defaults to 0 (no limit). Useful to control costs or batch updates.
 ```
 Notes:
-- Uses ADC (`gcloud auth application-default login`) and `PROJECT_ID`/`--project`.
+- Uses ADC (`gcloud auth application-default login`) and optional `--project` override (or `GOOGLE_CLOUD_PROJECT`).
 - Needs `client_secret.json` for YouTube metadata; falls back gracefully if missing.
 
 ### 2) Flask UI
@@ -330,7 +332,7 @@ gcloud run deploy prism-gui \
   --platform managed \
   --region europe-west4 \
   --allow-unauthenticated \
-  --set-secrets="AUTH_USERNAME=AUTH_USERNAME:latest,AUTH_PASSWORD=AUTH_PASSWORD:latest,PROJECT_ID=PROJECT_ID:latest"
+  --set-secrets="AUTH_USERNAME=AUTH_USERNAME:latest,AUTH_PASSWORD=AUTH_PASSWORD:latest"
 ```
 
 You will get a dynamic URL which you can then use to access the app. You can map a custom domain to the app (in GCC/Cloud Run/Domain Mappings).
