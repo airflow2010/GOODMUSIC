@@ -828,12 +828,9 @@ def build_rating_update(video_data: dict, user: dict, form) -> dict:
         raise ValueError("Video not found.")
     existing_rating = extract_user_rating(video_data, user)
 
-    base_genre = (video_data.get("genre") or "").strip()
-    submitted_genre = (form.get("genre") or "Unknown").strip()
-    genre_override = None
-    if submitted_genre:
-        if not base_genre or submitted_genre.lower() != base_genre.lower():
-            genre_override = submitted_genre
+    submitted_genre = (form.get("genre") or "").strip()
+    if not submitted_genre:
+        submitted_genre = (video_data.get("genre") or "Unknown").strip() or "Unknown"
 
     rated_at = existing_rating.get("rated_at") or firestore.SERVER_TIMESTAMP
     rating_data = {
@@ -843,9 +840,8 @@ def build_rating_update(video_data: dict, user: dict, form) -> dict:
         "rejected": "rejected" in form,
         "rated_at": rated_at,
         "updated_at": firestore.SERVER_TIMESTAMP,
+        "genre_override": submitted_genre,
     }
-    if genre_override:
-        rating_data["genre_override"] = genre_override
     return rating_data
 
 
