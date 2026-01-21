@@ -63,14 +63,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print actions without writing.")
     args = parser.parse_args()
 
-    admin_user = args.admin_user or os.environ.get("AUTH_GOOGLE") or os.environ.get("AUTH_USERNAME")
+    admin_user = args.admin_user or os.environ.get("ADMIN_USER")
     if not admin_user:
-        print("❌ Missing admin user. Provide --admin-user or set AUTH_GOOGLE/AUTH_USERNAME.", file=sys.stderr)
+        print("❌ Missing admin user. Provide --admin-user or set ADMIN_USER.", file=sys.stderr)
         sys.exit(1)
 
     auth_provider = args.auth_provider
     if not auth_provider:
-        auth_provider = "google" if admin_user == os.environ.get("AUTH_GOOGLE") else "basic"
+        auth_provider = "google" if "@" in admin_user else "basic"
 
     db = init_firestore_db(args.project)
     if not db:
@@ -131,13 +131,13 @@ def main():
                 removed_legacy += 1
         else:
             if rating_key in ratings:
-            if updates:
-                if args.dry_run:
-                    print(f"[dry-run] update rand for {doc.id}")
-                else:
-                    doc.reference.update(updates)
-                    bump_db_version(db)
-                updated_rand += 1
+                if updates:
+                    if args.dry_run:
+                        print(f"[dry-run] update rand for {doc.id}")
+                    else:
+                        doc.reference.update(updates)
+                        bump_db_version(db)
+                    updated_rand += 1
                 skipped += 1
                 continue
 

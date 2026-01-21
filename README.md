@@ -74,9 +74,8 @@ Due to the nature of this project several configuration steps are needed. Here i
 
 | name                 | note                                                         | local-run    | cloud-run      |
 | -------------------- | ------------------------------------------------------------ | ------------ | -------------- |
-| AUTH_USERNAME        | env-var with your GUI-username                               | .env         | Secret Manager |
-| AUTH_PASSWORD        | env-var with your GUI-password                               | .env         | Secret Manager |
-| AUTH_GOOGLE          | admin email (enables Google login; additional users via users collection) | .env | Secret Manager |
+| ADMIN_USER           | admin email (used for Google login admin and legacy basic auth username) | .env | Secret Manager |
+| ADMIN_PASSWORD       | env-var with your admin password (legacy basic auth)          | .env         | Secret Manager |
 | `client_secret.json` | file which identifies your software project (prism) against other apps (like YouTube) | project-root | Secret Manager |
 | `token.pickle`       | file which contains user credentials (access token and refresh token) used by server-side YouTube API calls (ingestion/import) | project-root | Secret Manager |
 | GEMINI_API_KEY       | env-var with your API-key for Google Gemini                  | .env         | Secret Manager |
@@ -125,9 +124,8 @@ Firestore database is somewhat limited in queries which it can directly fulfill.
 The easiest way to get going is just to create an .env file in the project root folder and fill it with the following environment variables:
 
 ```.env
-AUTH_USERNAME="<username>"
-AUTH_PASSWORD="<password>"
-AUTH_GOOGLE="<email-of-authorized-user>"
+ADMIN_USER="<admin-email>"
+ADMIN_PASSWORD="<password>"
 GEMINI_API_KEY="<api-key>"
 FLASK_SECRET_KEY="<random-stable-secret>"
 ```
@@ -152,9 +150,8 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    ```bash
    gcloud secrets create YOUTUBE_TOKEN_PICKLE --replication-policy="automatic"
    printf "your-api-key" | gcloud secrets create GEMINI_API_KEY --data-file=-
-   printf "your-username" | gcloud secrets create AUTH_USERNAME --data-file=-
-   printf "your-password" | gcloud secrets create AUTH_PASSWORD --data-file=-
-   printf "email-of-authorized-user" | gcloud secrets create AUTH_GOOGLE --data-file=-
+   printf "admin-email" | gcloud secrets create ADMIN_USER --data-file=-
+   printf "your-password" | gcloud secrets create ADMIN_PASSWORD --data-file=-
    printf "your-random-stable-secret" | gcloud secrets create FLASK_SECRET_KEY --data-file=-
    ```
 
@@ -210,7 +207,7 @@ The `users` collection stores per-user metadata:
 
 ##### Multi-user setup
 
-Any Google account can log in; users are auto-created on first login. The admin is still defined by `AUTH_GOOGLE` (or legacy basic auth).
+Any Google account can log in; users are auto-created on first login. The admin is defined by `ADMIN_USER` (and legacy basic auth uses the same username).
 
 1. Migrate legacy ratings to the admin user (run once):
 
@@ -332,7 +329,7 @@ gcloud run deploy prism-gui \
   --platform managed \
   --region europe-west4 \
   --allow-unauthenticated \
-  --set-secrets="AUTH_USERNAME=AUTH_USERNAME:latest,AUTH_PASSWORD=AUTH_PASSWORD:latest"
+  --set-secrets="ADMIN_USER=ADMIN_USER:latest,ADMIN_PASSWORD=ADMIN_PASSWORD:latest"
 ```
 
 You will get a dynamic URL which you can then use to access the app. You can map a custom domain to the app (in GCC/Cloud Run/Domain Mappings).

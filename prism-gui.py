@@ -64,6 +64,7 @@ CACHE_LOCK = threading.Lock()
 # --- Google OAuth Configuration (will be set later by reading client_secret.json)---
 GOOGLE_CLIENT_ID = None
 GOOGLE_CLIENT_SECRET = None
+GOOGLE_AUTH_ENABLED = False
 
 # Determine absolute path to client_secret.json to ensure it's found regardless of CWD
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -87,9 +88,8 @@ def get_conf(key, project_id=None):
         val = get_gcp_secret(key, project_id)
     return val
 
-AUTH_USERNAME = get_conf("AUTH_USERNAME", db.project if db else None)
-AUTH_PASSWORD = get_conf("AUTH_PASSWORD", db.project if db else None)
-AUTH_GOOGLE = get_conf("AUTH_GOOGLE", db.project if db else None)
+ADMIN_USER = get_conf("ADMIN_USER", db.project if db else None)
+ADMIN_PASSWORD = get_conf("ADMIN_PASSWORD", db.project if db else None)
 FLASK_SECRET_KEY = get_conf("FLASK_SECRET_KEY", db.project if db else None)
 
 # Load Google Credentials from client_secret.json or Secret Manager
@@ -121,10 +121,10 @@ elif db and db.project:
 def check_prerequisites():
     """Checks for prerequisites for successful deployment and refuses to start if not met."""
     missing_vars = []
-    if not AUTH_USERNAME:
-        missing_vars.append("AUTH_USERNAME")
-    if not AUTH_PASSWORD:
-        missing_vars.append("AUTH_PASSWORD")
+    if not ADMIN_USER:
+        missing_vars.append("ADMIN_USER")
+    if not ADMIN_PASSWORD:
+        missing_vars.append("ADMIN_PASSWORD")
     if not FLASK_SECRET_KEY:
         missing_vars.append("FLASK_SECRET_KEY")
 
@@ -140,7 +140,7 @@ def check_prerequisites():
             print("   You appear to be running on Google Cloud Run.")
             print("   Ensure you have mounted the Google Cloud Secrets as environment variables.")
             print("   Verify your 'gcloud run deploy' command includes:")
-            print('   --set-secrets="AUTH_USERNAME=AUTH_USERNAME:latest,AUTH_PASSWORD=AUTH_PASSWORD:latest"')
+            print('   --set-secrets="ADMIN_USER=ADMIN_USER:latest,ADMIN_PASSWORD=ADMIN_PASSWORD:latest"')
         else:
             print("   You appear to be running locally.")
             print("   Ensure you have a .env file or exported environment variables.")
@@ -202,15 +202,15 @@ def check_prerequisites():
                 print(f"   Details: {e}")
                 print("   You may need to refresh cookies or verify the account.")
 
-    if AUTH_GOOGLE and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
-        print("\n⚠️  WARNING: AUTH_GOOGLE is set, but client_secret.json is missing or invalid.")
+    if ADMIN_USER and (not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET):
+        print("\n⚠️  WARNING: ADMIN_USER is set, but client_secret.json is missing or invalid.")
         print(f"   Expected file at: {CLIENT_SECRET_FILE}")
         print("   Google Authentication will be disabled, falling back to Basic Auth only.")
         print("   Ensure you have a valid client_secret.json file or 'CLIENT_SECRET_JSON' in Secret Manager.")
-    elif AUTH_GOOGLE:
-        print(f"✅ Google Authentication enabled (admin): {AUTH_GOOGLE}")
+    elif ADMIN_USER:
+        print(f"✅ Google Authentication enabled (admin): {ADMIN_USER}")
     else:
-        print("ℹ️  Google Authentication disabled (AUTH_GOOGLE not set).")
+        print("ℹ️  Google Authentication disabled (ADMIN_USER not set).")
 
     # Check for required templates
     required_templates = ['rate.html', 'play.html', 'admin.html']
@@ -465,7 +465,7 @@ def build_user_context(user_id: str, auth_provider: str, user_doc: Optional[dict
 
 
 def resolve_basic_user(username: str, password: str) -> Optional[dict]:
-    if AUTH_USERNAME and AUTH_PASSWORD and username == AUTH_USERNAME and password == AUTH_PASSWORD:
+    if ADMIN_USER and ADMIN_PASSWORD and username == ADMIN_USER and password == ADMIN_PASSWORD:
         user_doc = ensure_user_record(
             username,
             role="admin",
@@ -487,7 +487,7 @@ def resolve_basic_user(username: str, password: str) -> Optional[dict]:
 
 
 def resolve_google_user(email: str) -> Optional[dict]:
-    is_admin = AUTH_GOOGLE and email == AUTH_GOOGLE
+    is_admin = ADMIN_USER and email == ADMIN_USER
     if is_admin:
         user_doc = ensure_user_record(
             email,
@@ -512,7 +512,7 @@ def resolve_google_user(email: str) -> Optional[dict]:
 
 def resolve_request_user() -> Optional[dict]:
     g.auth_rate_limited = False
-    if AUTH_GOOGLE and session.get("user"):
+    if GOOGLE_AUTH_ENABLED and session.get("user"):
         user = resolve_google_user(session.get("user"))
         if user:
             return user
@@ -606,7 +606,7 @@ def start_request_timer():
 # --- OAuth Initialization ---
 oauth = OAuth(app)
 google = None
-if AUTH_GOOGLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+if ADMIN_USER and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
     google = oauth.register(
         name='google',
         client_id=GOOGLE_CLIENT_ID,
@@ -614,6 +614,7 @@ if AUTH_GOOGLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
         server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
         client_kwargs={'scope': 'openid email'}
     )
+GOOGLE_AUTH_ENABLED = bool(google)
 
 
 @app.context_processor
@@ -667,10 +668,7 @@ def requires_auth(f):
         if getattr(g, "auth_rate_limited", False):
             return Response("Too many login attempts. Please try again later.", 429)
 
-        if AUTH_GOOGLE and not session.get('prefer_legacy'):
-            if not google:
-                return Response("Configuration Error: AUTH_GOOGLE is set but Google Client is not initialized. Check server logs for missing client_secret.json.", 500)
-
+        if GOOGLE_AUTH_ENABLED and not session.get('prefer_legacy'):
             if session.get('google_attempted'):
                 return Response(f"Access Denied: Your account is disabled.<br><a href='{url_for('login_google')}'>Try again</a><br>or <a href='{url_for('login_legacy')}'>Legacy Login</a>", 403)
 
@@ -731,9 +729,7 @@ def format_ts(value: Optional[datetime]) -> str:
 def is_protected_user(user_id: str, user_data: dict, current_user_id: str) -> bool:
     if user_id == current_user_id:
         return True
-    if AUTH_GOOGLE and user_id == AUTH_GOOGLE:
-        return True
-    if AUTH_USERNAME and user_id == AUTH_USERNAME:
+    if ADMIN_USER and user_id == ADMIN_USER:
         return True
     if user_data.get("role") == "admin":
         return True
@@ -1021,11 +1017,11 @@ def index():
         return redirect(url_for('rating_mode'))
 
     unauthorized_email = None
-    if AUTH_GOOGLE and session.get('user'):
+    if GOOGLE_AUTH_ENABLED and session.get('user'):
         if not resolve_google_user(session.get('user')):
             unauthorized_email = session.get('user')
         
-    return render_template('login.html', google_enabled=bool(AUTH_GOOGLE), unauthorized_email=unauthorized_email)
+    return render_template('login.html', google_enabled=GOOGLE_AUTH_ENABLED, unauthorized_email=unauthorized_email)
 
 
 @app.route("/rate", methods=['GET'])
