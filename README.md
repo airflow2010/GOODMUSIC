@@ -170,6 +170,11 @@ To secure the Flask UI in Cloud Run without exposing credentials in deployment c
    gcloud secrets add-iam-policy-binding YOUTUBE_TOKEN_PICKLE \
      --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" \
      --role="roles/secretmanager.secretVersionAdder"
+
+   # Optional: allow pruning old token versions (destroys prior versions)
+   gcloud secrets add-iam-policy-binding YOUTUBE_TOKEN_PICKLE \
+     --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" \
+     --role="roles/secretmanager.secretVersionManager"
    ```
 
    If you prefer, you edit those changes also in the [Google Cloud Console](https://console.cloud.google.com/) under IAM & admin/IAM/Grant access.

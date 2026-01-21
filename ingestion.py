@@ -73,17 +73,49 @@ def get_gcp_secret(secret_id: str, project_id: str, version_id: str = "latest") 
         print(f"⚠️  Could not fetch secret '{secret_id}': {e}")
         return None
 
-def update_gcp_secret(secret_id: str, project_id: str, content_str: str) -> bool:
+def _version_sort_key(version) -> tuple[int, int]:
+    create_time = getattr(version, "create_time", None)
+    if create_time and hasattr(create_time, "seconds"):
+        return (int(create_time.seconds), int(getattr(create_time, "nanos", 0)))
+    return (0, 0)
+
+def prune_gcp_secret_versions(client, parent: str, keep_latest: int = 1) -> None:
+    if keep_latest < 1:
+        keep_latest = 1
+    versions = list(client.list_secret_versions(request={"parent": parent}))
+    candidates = [
+        version
+        for version in versions
+        if version.state != secretmanager.SecretVersion.State.DESTROYED
+    ]
+    if len(candidates) <= keep_latest:
+        return
+    candidates.sort(key=_version_sort_key, reverse=True)
+    for version in candidates[keep_latest:]:
+        client.destroy_secret_version(request={"name": version.name})
+
+def update_gcp_secret(
+    secret_id: str,
+    project_id: str,
+    content_str: str,
+    destroy_old_versions: bool = False,
+    keep_latest: int = 1,
+) -> bool:
     """Adds a new version to the specified secret in Google Cloud Secret Manager."""
     try:
         client = secretmanager.SecretManagerServiceClient()
         parent = f"projects/{project_id}/secrets/{secret_id}"
         payload = {"data": content_str.encode("UTF-8")}
         client.add_secret_version(request={"parent": parent, "payload": payload})
-        return True
     except Exception as e:
         print(f"⚠️  Could not update secret '{secret_id}': {e}")
         return False
+    if destroy_old_versions:
+        try:
+            prune_gcp_secret_versions(client, parent, keep_latest=keep_latest)
+        except Exception as e:
+            print(f"Warning: Could not prune secret versions for '{secret_id}': {e}")
+    return True
 
 def init_ai_model(project_id: Optional[str] = None, location: str = "europe-west4", credentials=None):
     """Initializes and returns the GenAI client using API Key (Env or Secret Manager)."""
@@ -260,7 +292,7 @@ def get_youtube_service(token_file: str = TOKEN_FILE, client_secrets_file: str =
         if project_id:
             print(f"🔄 Syncing new token to Secret Manager ({secret_name})...")
             b64_creds = base64.b64encode(pickle.dumps(creds)).decode()
-            update_gcp_secret(secret_name, project_id, b64_creds)
+            update_gcp_secret(secret_name, project_id, b64_creds, destroy_old_versions=True)
 
     return build("youtube", "v3", credentials=creds)
 
