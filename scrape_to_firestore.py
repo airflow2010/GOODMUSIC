@@ -5,9 +5,10 @@ import json
 import re
 import time
 import sys
+import textwrap
 from typing import List, Tuple
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,10 +19,19 @@ from google.cloud import firestore
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from ingestion import get_youtube_service, ingest_video_batch, parse_datetime, init_ai_model, init_firestore_db, AI_MODEL_NAME
+from ingestion import (
+    get_youtube_service,
+    ingest_video_batch,
+    parse_datetime,
+    init_ai_model,
+    init_firestore_db,
+    AI_MODEL_NAME,
+    fetch_playlist_video_ids,
+)
 
 # ====== Configuration ======
 YOUTUBE_ID_RE = r"[A-Za-z0-9_-]{11}"
+DEFAULT_SUBSTACK_URL = "https://goodmusic.substack.com/archive"
 DEFAULT_SCROLL_PAUSE_SECONDS = 1.0
 DEFAULT_MATCH_THRESHOLD = 0.70
 DEFAULT_MAX_SEARCH_RESULTS = 5
@@ -251,6 +261,51 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, ma
 
     print()
     return summary["added"], summary.get("aborted", False)
+
+def normalize_playlist_id(raw: str) -> str:
+    """Extract playlist ID from plain ID or URL."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "://" in value:
+        try:
+            parsed = urlparse(value)
+            qs = parse_qs(parsed.query)
+            value = qs.get("list", [value])[-1]
+        except Exception:
+            pass
+    return value
+
+def normalize_video_id(raw: str) -> str:
+    """Extract video ID from plain ID or typical YouTube URL."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "youtu" in value:
+        try:
+            parsed = urlparse(value)
+            if parsed.hostname and "youtu.be" in parsed.hostname:
+                candidate = parsed.path.lstrip("/")
+                if candidate:
+                    return candidate
+            qs = parse_qs(parsed.query)
+            candidate = qs.get("v", [value])[-1]
+            if candidate:
+                return candidate
+        except Exception:
+            pass
+    return value
+
+def parse_video_ids(raw: str) -> List[str]:
+    if not raw:
+        return []
+    raw_ids = raw.replace("\n", ",")
+    ids: List[str] = []
+    for vid in raw_ids.split(","):
+        norm = normalize_video_id(vid)
+        if norm and re.fullmatch(YOUTUBE_ID_RE, norm):
+            ids.append(norm)
+    return _dedupe_preserve_order(ids)
 
 def _normalize_text(text: str) -> str:
     clean = text.lower().replace("&", " and ")
@@ -589,6 +644,106 @@ def _fetch_rendered_html(url: str, max_scrolls: int, scroll_pause: float, debug:
 
     return html, final_url, title, scrolls
 
+def run_substack_import(args, db, model, youtube) -> None:
+    substack_url = args.substack or DEFAULT_SUBSTACK_URL
+    print(f"📥 Fetching posts from {substack_url}...")
+    posts = fetch_substack_posts_json(substack_url, limit_per_page=20)
+
+    if args.limit_substack_posts > 0:
+        posts = posts[:args.limit_substack_posts]
+
+    print(f"🔄 Processing {len(posts)} posts...")
+    total_new_entries = 0
+    for i, post in enumerate(posts):
+        if args.limit_new_db_entries > 0 and total_new_entries >= args.limit_new_db_entries:
+            print(f"🛑 Limit of {args.limit_new_db_entries} new DB entries reached.")
+            break
+
+        print(f"[{i+1}/{len(posts)}] Processing {post['title']}...")
+        html_text = fetch_post_html(post["url"])
+
+        remaining_limit = 0
+        if args.limit_new_db_entries > 0:
+            remaining_limit = args.limit_new_db_entries - total_new_entries
+
+        added, aborted = process_post_to_firestore(
+            db,
+            model,
+            youtube,
+            post,
+            html_text,
+            max_new_entries=remaining_limit,
+            model_name=AI_MODEL_NAME,
+        )
+
+        if aborted:
+            print("🛑 Aborting scraper due to critical error (IP blocking).")
+            break
+
+        total_new_entries += added
+
+def run_playlist_import(args, db, model, youtube) -> None:
+    playlist_id = normalize_playlist_id(args.playlist_id)
+    if not playlist_id:
+        print("❌ Invalid playlist ID or URL.")
+        return
+
+    print(f"📥 Fetching playlist {playlist_id}...")
+    try:
+        ids = fetch_playlist_video_ids(youtube, playlist_id)
+    except Exception as e:
+        print(f"❌ Error fetching playlist: {e}")
+        return
+
+    if not ids:
+        print("⚠️ No videos found in playlist or playlist is private.")
+        return
+
+    if args.playlist_limit and args.playlist_limit > 0:
+        ids = ids[:args.playlist_limit]
+        print(f"ℹ️ Limiting to first {args.playlist_limit} entries.")
+
+    print(f"✅ Found {len(ids)} unique videos. Starting import...")
+    source = f"https://www.youtube.com/playlist?list={playlist_id}"
+    summary = ingest_video_batch(
+        db=db,
+        youtube=youtube,
+        video_ids=ids,
+        source=source,
+        model=model,
+        model_name=AI_MODEL_NAME,
+        max_new_entries=args.limit_new_db_entries,
+        sleep_between=0.5,
+        progress_logger=lambda msg: print(msg),
+    )
+    print(
+        f"\nSummary: {summary['added']} added, {summary['exists']} existing, "
+        f"{summary['unavailable']} unavailable, {summary['errors']} errors."
+    )
+
+def run_video_ids_import(args, db, model, youtube) -> None:
+    ids = parse_video_ids(args.video_ids or "")
+    if not ids:
+        print("❌ No valid video IDs found.")
+        return
+
+    print(f"✅ Received {len(ids)} video ID(s). Starting import...")
+    summary = ingest_video_batch(
+        db=db,
+        youtube=youtube,
+        video_ids=ids,
+        source="manual-import",
+        model=model,
+        model_name=AI_MODEL_NAME,
+        max_new_entries=args.limit_new_db_entries,
+        sleep_between=0.5,
+        progress_logger=lambda msg: print(msg),
+    )
+    print(
+        f"\nSummary: {summary['added']} added, {summary['exists']} existing, "
+        f"{summary['unavailable']} unavailable, {summary['errors']} errors."
+    )
+
 def run_url_scan(args, db, model, youtube) -> None:
     url = (args.url or "").strip()
     if not url:
@@ -707,6 +862,7 @@ def run_url_scan(args, db, model, youtube) -> None:
         source=url,
         model=model,
         model_name=AI_MODEL_NAME,
+        max_new_entries=args.limit_new_db_entries,
         sleep_between=0.5,
         progress_logger=lambda msg: print(msg),
     )
@@ -715,13 +871,41 @@ def run_url_scan(args, db, model, youtube) -> None:
         f"{summary['unavailable']} unavailable, {summary['errors']} errors."
     )
 
+def print_mode_help(parser) -> None:
+    parser.print_help()
+    examples = textwrap.dedent(
+        f"""
+        Import modes (choose one):
+          Substack archive:
+            python scrape_to_firestore.py --substack {DEFAULT_SUBSTACK_URL}
+            python scrape_to_firestore.py --substack {DEFAULT_SUBSTACK_URL} --limit-substack-posts 5
+          YouTube playlist:
+            python scrape_to_firestore.py --playlist-id PLxxxx --playlist-limit 50
+          YouTube video IDs (comma or newline separated):
+            python scrape_to_firestore.py --video-ids "abc123def45, Zyx987uvw65"
+          URL scan (render + Gemini):
+            python scrape_to_firestore.py --url "https://example.com/thread" --url-debug --url-dry-run
+
+        Common options:
+          --project <GCP_PROJECT_ID>
+          --limit-new-db-entries <N>  (limits ingestion across modes)
+        """
+    ).strip()
+    print(f"\n{examples}")
+
 def main():
-    parser = argparse.ArgumentParser(description="Scrape music videos to Firestore.")
-    parser.add_argument("--substack", default="https://goodmusic.substack.com/archive", help="Substack Archive URL")
+    parser = argparse.ArgumentParser(description="Import music videos into Firestore from various sources.")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--substack", help="Substack archive URL.")
+    mode_group.add_argument("--playlist-id", "--playlist", dest="playlist_id", help="YouTube playlist ID or URL.")
+    mode_group.add_argument("--video-ids", help="YouTube video IDs or URLs (comma or newline separated).")
+    mode_group.add_argument("--url", help="Scan a URL for embedded YouTube videos and mentions.")
+
     parser.add_argument("--project", help="Google Cloud Project ID")
-    parser.add_argument("--limit-substack-posts", type=int, default=0, help="Limit posts to process (0 for all)")
+    parser.add_argument("--limit-substack-posts", type=int, default=0, help="Limit Substack posts to process (0 for all)")
     parser.add_argument("--limit-new-db-entries", type=int, default=0, help="Limit new DB entries to add (0 for all)")
-    parser.add_argument("--url", help="Scan a URL for embedded YouTube videos and mentions.")
+    parser.add_argument("--playlist-limit", type=int, default=0, help="Limit playlist entries to process (0 for all)")
+
     parser.add_argument("--url-dry-run", action="store_true", help="List found videos without ingesting.")
     parser.add_argument("--url-debug", action="store_true", help="Verbose debug output for URL scan.")
     parser.add_argument("--url-max-mentions", type=int, default=0, help="Limit Gemini mentions (0 for all).")
@@ -729,7 +913,29 @@ def main():
     parser.add_argument("--url-max-scrolls", type=int, default=0, help="Max scrolls for infinite pages (0 for no limit).")
     parser.add_argument("--url-scroll-pause", type=float, default=DEFAULT_SCROLL_PAUSE_SECONDS, help="Pause between scrolls (seconds).")
     parser.add_argument("--url-match-threshold", type=float, default=DEFAULT_MATCH_THRESHOLD, help="Match threshold for YouTube search results.")
+
+    if len(sys.argv) == 1:
+        print_mode_help(parser)
+        return
+
     args = parser.parse_args()
+
+    mode = None
+    if args.url:
+        mode = "url"
+    elif args.playlist_id:
+        mode = "playlist"
+    elif args.video_ids:
+        mode = "video_ids"
+    elif args.substack or args.limit_substack_posts > 0 or args.limit_new_db_entries > 0:
+        mode = "substack"
+
+    if not mode:
+        print_mode_help(parser)
+        return
+
+    if mode != "substack" and args.limit_substack_posts > 0:
+        print("⚠️ --limit-substack-posts applies only to --substack mode; ignoring.")
 
     print(f"🚀 Initializing for Project: {args.project or 'Default'}")
     
@@ -749,39 +955,14 @@ def main():
         print("   Please run `rm token.pickle` and re-run the script to re-authenticate.")
         sys.exit(1)
 
-    if args.url:
+    if mode == "url":
         run_url_scan(args, db, model, youtube)
-        return
-
-    # 4. Fetch Posts
-    print(f"📥 Fetching posts from {args.substack}...")
-    posts = fetch_substack_posts_json(args.substack, limit_per_page=20)
-    
-    if args.limit_substack_posts > 0:
-        posts = posts[:args.limit_substack_posts]
-
-    # 5. Process
-    print(f"🔄 Processing {len(posts)} posts...")
-    total_new_entries = 0
-    for i, post in enumerate(posts):
-        if args.limit_new_db_entries > 0 and total_new_entries >= args.limit_new_db_entries:
-            print(f"🛑 Limit of {args.limit_new_db_entries} new DB entries reached.")
-            break
-
-        print(f"[{i+1}/{len(posts)}] Processing {post['title']}...")
-        html_text = fetch_post_html(post["url"])
-        
-        remaining_limit = 0
-        if args.limit_new_db_entries > 0:
-            remaining_limit = args.limit_new_db_entries - total_new_entries
-
-        added, aborted = process_post_to_firestore(db, model, youtube, post, html_text, max_new_entries=remaining_limit, model_name=model_name)
-        
-        if aborted:
-            print("🛑 Aborting scraper due to critical error (IP blocking).")
-            break
-            
-        total_new_entries += added
+    elif mode == "playlist":
+        run_playlist_import(args, db, model, youtube)
+    elif mode == "video_ids":
+        run_video_ids_import(args, db, model, youtube)
+    else:
+        run_substack_import(args, db, model, youtube)
 
 if __name__ == "__main__":
     try:
