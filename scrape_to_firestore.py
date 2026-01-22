@@ -36,8 +36,26 @@ DEFAULT_SCROLL_PAUSE_SECONDS = 1.0
 DEFAULT_MATCH_THRESHOLD = 0.70
 DEFAULT_MAX_SEARCH_RESULTS = 5
 MAX_TEXT_CHUNK_CHARS = 6000
-SCROLL_STABLE_CYCLES = 3
+SCROLL_STABLE_CYCLES = 5
 DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+EXPAND_BUTTON_TEXTS = [
+    "load more comments",
+    "view more comments",
+    "more comments",
+    "view more replies",
+    "more replies",
+    "load more replies",
+    "load more",
+    "view more",
+    "show more",
+]
+EXPAND_BUTTON_SKIP_TEXTS = [
+    "continue this thread",
+    "view full discussion",
+    "open in app",
+]
+MAX_EXPAND_BUTTON_CLICKS = 8
+TEXT_GROWTH_THRESHOLD = 200
 
 MATCH_STOPWORDS = {
     "the",
@@ -594,6 +612,46 @@ def _fetch_rendered_html(url: str, max_scrolls: int, scroll_pause: float, debug:
             "document.documentElement ? document.documentElement.scrollHeight : 0)"
         ) or 0
 
+    def _text_length(page) -> int:
+        return page.evaluate(
+            "() => (document.body && document.body.innerText) ? document.body.innerText.length : 0"
+        ) or 0
+
+    def _click_expand_buttons(page) -> int:
+        pattern = re.compile("|".join(re.escape(text) for text in EXPAND_BUTTON_TEXTS), re.IGNORECASE)
+        locator = page.locator("button, [role='button']").filter(has_text=pattern)
+        try:
+            count = locator.count()
+        except Exception:
+            return 0
+
+        clicked = 0
+        for idx in range(min(count, MAX_EXPAND_BUTTON_CLICKS)):
+            try:
+                button = locator.nth(idx)
+                if not button.is_visible():
+                    continue
+                text = (button.inner_text(timeout=1000) or "").strip().lower()
+                if any(skip in text for skip in EXPAND_BUTTON_SKIP_TEXTS):
+                    continue
+                href = button.get_attribute("href")
+                if href and not href.startswith("#") and not href.startswith("javascript:"):
+                    continue
+                button.scroll_into_view_if_needed(timeout=1000)
+                button.click(timeout=2000)
+                clicked += 1
+                if debug:
+                    print(f"   🔽 Clicked expand button: {text[:80]}")
+                time.sleep(0.3)
+            except Exception:
+                continue
+        if clicked:
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except PlaywrightTimeoutError:
+                pass
+        return clicked
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
@@ -612,6 +670,7 @@ def _fetch_rendered_html(url: str, max_scrolls: int, scroll_pause: float, debug:
         scrolls = 0
         stable_cycles = 0
         last_height = _scroll_height(page)
+        last_text_length = _text_length(page)
 
         while True:
             if max_scrolls and scrolls >= max_scrolls:
@@ -623,12 +682,28 @@ def _fetch_rendered_html(url: str, max_scrolls: int, scroll_pause: float, debug:
                 page.wait_for_load_state("networkidle", timeout=10000)
             except PlaywrightTimeoutError:
                 pass
+            clicked = _click_expand_buttons(page)
+            if debug and clicked:
+                print(f"   🔄 Expanded {clicked} sections")
             new_height = _scroll_height(page)
+            new_text_length = _text_length(page)
             if new_height <= last_height:
-                stable_cycles += 1
+                height_changed = False
             else:
-                stable_cycles = 0
+                height_changed = True
                 last_height = new_height
+
+            if new_text_length <= last_text_length + TEXT_GROWTH_THRESHOLD:
+                text_changed = False
+            else:
+                text_changed = True
+                last_text_length = new_text_length
+
+            if height_changed or text_changed:
+                stable_cycles = 0
+            else:
+                stable_cycles += 1
+
             if stable_cycles >= SCROLL_STABLE_CYCLES:
                 break
 
@@ -896,7 +971,12 @@ def print_mode_help(parser) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Import music videos into Firestore from various sources.")
     mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument("--substack", help="Substack archive URL.")
+    mode_group.add_argument(
+        "--substack",
+        nargs="?",
+        const=DEFAULT_SUBSTACK_URL,
+        help=f"Substack archive URL (default: {DEFAULT_SUBSTACK_URL}).",
+    )
     mode_group.add_argument("--playlist-id", "--playlist", dest="playlist_id", help="YouTube playlist ID or URL.")
     mode_group.add_argument("--video-ids", help="YouTube video IDs or URLs (comma or newline separated).")
     mode_group.add_argument("--url", help="Scan a URL for embedded YouTube videos and mentions.")
@@ -927,7 +1007,7 @@ def main():
         mode = "playlist"
     elif args.video_ids:
         mode = "video_ids"
-    elif args.substack or args.limit_substack_posts > 0 or args.limit_new_db_entries > 0:
+    elif args.substack is not None:
         mode = "substack"
 
     if not mode:
@@ -946,7 +1026,6 @@ def main():
     
     # 2. AI Model
     model = init_ai_model(db.project)
-    model_name = AI_MODEL_NAME
     
     # 3. YouTube API (using OAuth 2.0 flow)
     youtube = get_youtube_service()
