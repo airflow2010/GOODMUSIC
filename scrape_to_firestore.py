@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 # Google Cloud imports
 import google.auth
 from google.cloud import firestore
+from googleapiclient.errors import HttpError
 from google.genai import types
 from pydantic import BaseModel, Field
 
@@ -559,6 +560,21 @@ def _search_youtube(youtube, query: str, max_results: int) -> List[dict]:
         })
     return items
 
+def _is_quota_exceeded_error(err: Exception) -> bool:
+    msg = str(err)
+    if "quotaExceeded" in msg or "exceeded your quota" in msg or "dailyLimitExceeded" in msg:
+        return True
+    if isinstance(err, HttpError):
+        try:
+            payload = json.loads(err.content.decode("utf-8"))
+            for entry in payload.get("error", {}).get("errors", []):
+                reason = (entry.get("reason") or "").lower()
+                if reason in {"quotaexceeded", "dailylimitexceeded"}:
+                    return True
+        except Exception:
+            pass
+    return False
+
 def _pick_best_match(
     artist: str,
     track: str,
@@ -881,6 +897,7 @@ def run_url_scan(args, db, model, youtube) -> None:
                 print(f"     ↳ {mention.evidence}")
 
     resolved_ids: List[str] = []
+    quota_exceeded = False
     for mention in mentions:
         query = f"{mention.artist} {mention.track} official music video".strip()
         if args.url_debug:
@@ -892,6 +909,10 @@ def run_url_scan(args, db, model, youtube) -> None:
                 max_results=args.url_max_search_results,
             )
         except Exception as e:
+            if _is_quota_exceeded_error(e):
+                print("🛑 YouTube API quota exceeded. Stopping further search resolution.")
+                quota_exceeded = True
+                break
             print(f"   ⚠️ YouTube search failed for '{query}': {e}")
             continue
 
@@ -915,6 +936,9 @@ def run_url_scan(args, db, model, youtube) -> None:
                     )
                 else:
                     print("   ❌ No results returned.")
+
+    if quota_exceeded and not resolved_ids and not direct_ids:
+        print("⚠️ No videos resolved before quota was exhausted.")
 
     all_ids = _dedupe_preserve_order(direct_ids + resolved_ids)
     print(f"✅ Total unique videos: {len(all_ids)}")
