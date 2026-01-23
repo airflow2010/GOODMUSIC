@@ -417,7 +417,24 @@ def select_best_audio_format(formats: list, max_size_mb: int = 25) -> Optional[s
 
 def is_video_unavailable_error(error_text: str) -> bool:
     lowered = error_text.lower()
-    return "video unavailable" in lowered and "not available" in lowered
+    availability_phrases = (
+        "video unavailable",
+        "this video is not available",
+        "private video",
+        "video is private",
+        "not available in your country",
+        "not available in your location",
+        "blocked in your country",
+        "blocked in your region",
+        "blocked on copyright grounds",
+        "blocked it on copyright grounds",
+        "copyright grounds",
+    )
+    if any(phrase in lowered for phrase in availability_phrases):
+        return True
+    if "contains content from" in lowered and "blocked" in lowered:
+        return True
+    return False
 
 
 def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], Optional[str]]:
