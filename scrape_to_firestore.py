@@ -2,6 +2,7 @@
 import argparse
 import html as htmllib
 import json
+import os
 import re
 import time
 import sys
@@ -91,6 +92,59 @@ MATCH_STOPWORDS = {
     "performance",
     "clip",
 }
+
+def warn_if_cookies_missing_or_invalid() -> None:
+    """Warn if cookies.txt is missing or fails validation for age-restricted access."""
+    def confirm_proceed_without_valid_cookies() -> None:
+        while True:
+            try:
+                resp = input("Do you still want to proceed even without a valid cookie? (y/n) ").strip().lower()
+            except EOFError:
+                print("\n❌ No input available. Aborting.")
+                sys.exit(1)
+            if resp in ("y", "yes"):
+                return
+            if resp in ("n", "no"):
+                print("🛑 Aborting at user request (no valid cookies).")
+                sys.exit(1)
+            print("Please enter 'y' or 'n'.")
+
+    cookies_path = "cookies.txt"
+    if not os.path.exists(cookies_path):
+        print("⚠️  Warning: cookies.txt not found.")
+        print("   Certain videos (e.g. age-restricted) may not be digested without valid cookies.")
+        confirm_proceed_without_valid_cookies()
+        return
+
+    try:
+        import yt_dlp
+    except Exception as e:
+        print(f"⚠️  Warning: Unable to import yt-dlp for cookie validation: {e}")
+        print("   Certain videos (e.g. age-restricted) may not be digested without valid cookies.")
+        confirm_proceed_without_valid_cookies()
+        return
+
+    test_video_id = os.environ.get("YOUTUBE_COOKIE_TEST_VIDEO_ID", "BgK_Er7WZVg")
+    test_url = f"https://www.youtube.com/watch?v={test_video_id}"
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "cookiefile": cookies_path,
+        "socket_timeout": 10,
+        "js_runtimes": {"node": {}},
+        "remote_components": ["ejs:github"],
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(test_url, download=False)
+        print(f"✅ cookies.txt validated for age-restricted access (video {test_video_id}).")
+    except Exception as e:
+        print("⚠️  Warning: cookies.txt present but could not validate age-restricted access.")
+        print(f"   Details: {e}")
+        print("   Certain videos (e.g. age-restricted) may not be digested without valid cookies.")
+        print("   You may need to refresh cookies or verify the account.")
+        confirm_proceed_without_valid_cookies()
 
 class MusicMention(BaseModel):
     artist: str = Field(description="Artist name (required).")
@@ -1042,6 +1096,7 @@ def main():
         print("⚠️ --limit-substack-posts applies only to --substack mode; ignoring.")
 
     print(f"🚀 Initializing for Project: {args.project or 'Default'}")
+    warn_if_cookies_missing_or_invalid()
     
     # 1. Firestore
     db = init_firestore_db(args.project)
