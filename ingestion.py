@@ -5,6 +5,7 @@ import time
 import json
 import base64
 import random
+import glob
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional
 
@@ -341,78 +342,90 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | Non
         return "", "", None
 
 
-def select_best_audio_format(formats: list, max_size_mb: int = 25) -> Optional[str]:
-    """Selects the best audio format under a given size, handling unknown sizes."""
+def select_download_format_candidates(formats: list, max_size_mb: int = 25) -> List[str]:
+    """
+    Builds an ordered list of format selectors to try.
+    We prefer small progressive formats first because some YouTube audio-only
+    formats (e.g. 140/251) may return HTTP 403 in current extractor conditions.
+    """
 
     def get_filesize(f):
         # filesize_approx is often available when filesize is not
         return f.get("filesize") or f.get("filesize_approx")
 
-    # --- Pass 1: Find audio-only formats ---
-    # More robust check: vcodec is 'none' or the key doesn't exist, but acodec must exist.
+    max_bytes = max_size_mb * 1024 * 1024
+
+    # --- Candidate group A: Progressive video+audio with known small size ---
+    all_video_formats = [
+        f
+        for f in formats
+        if f.get("vcodec") != "none" and f.get("acodec") != "none"
+    ]
+    progressive_known_size = [
+        f for f in all_video_formats
+        if get_filesize(f) and get_filesize(f) < max_bytes and f.get("height", float("inf")) <= 480
+    ]
+    progressive_known_size.sort(
+        key=lambda f: (f.get("height", 0) or 0, f.get("tbr", 0) or 0)
+    )
+
+    # Keep only the first few to avoid too many retries.
+    candidates: List[str] = []
+    for f in progressive_known_size[:4]:
+        fmt = f.get("format_id")
+        if fmt and fmt not in candidates:
+            candidates.append(fmt)
+
+    # If no strict-small progressive format exists, allow a moderate overshoot.
+    progressive_near_limit = [
+        f for f in all_video_formats
+        if get_filesize(f) and get_filesize(f) < (max_bytes * 2) and f.get("height", float("inf")) <= 480
+    ]
+    progressive_near_limit.sort(
+        key=lambda f: (get_filesize(f) or float("inf"), f.get("height", 0) or 0)
+    )
+    for f in progressive_near_limit[:2]:
+        fmt = f.get("format_id")
+        if fmt and fmt not in candidates:
+            candidates.append(fmt)
+
+    # --- Candidate group B: Audio-only formats ---
+    # More robust check: vcodec is 'none' (or missing), and audio codec exists.
     all_audio_formats = [
         f
         for f in formats
         if (f.get("vcodec") == "none" or not f.get("vcodec")) and f.get("acodec") != "none"
     ]
 
-    # 1a. Prefer audio-only formats with a known, suitable size
+    # 1) Audio-only with known small size
     suitable_audio_known_size = [
-        f for f in all_audio_formats if get_filesize(f) and get_filesize(f) < max_size_mb * 1024 * 1024
+        f for f in all_audio_formats if get_filesize(f) and get_filesize(f) < max_bytes
     ]
-    if suitable_audio_known_size:
-        suitable_audio_known_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
-        selected = suitable_audio_known_size[0]
-        print(
-            f"   ℹ️ Found suitable audio-only format with known size: {selected['format_id']} ({selected.get('abr')}k, {round(get_filesize(selected) / (1024*1024), 2)}MB)"
-        )
-        return selected["format_id"]
+    suitable_audio_known_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
+    for f in suitable_audio_known_size[:3]:
+        fmt = f.get("format_id")
+        if fmt and fmt not in candidates:
+            candidates.append(fmt)
 
-    # 1b. If none, take a chance on an audio-only format with unknown size (they are usually small)
+    # 2) Audio-only unknown size
     audio_unknown_size = [f for f in all_audio_formats if not get_filesize(f)]
-    if audio_unknown_size:
-        audio_unknown_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
-        selected = audio_unknown_size[0]
-        print(
-            f"   ℹ️ Found audio-only format with unknown size. Selecting best bitrate: {selected['format_id']} ({selected.get('abr')}k)"
-        )
-        return selected["format_id"]
+    audio_unknown_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
+    for f in audio_unknown_size[:2]:
+        fmt = f.get("format_id")
+        if fmt and fmt not in candidates:
+            candidates.append(fmt)
 
-    # --- Pass 2: Find video+audio formats as a fallback ---
-    all_video_formats = [
-        f
-        for f in formats
-        if f.get("vcodec") != "none" and f.get("acodec") != "none"
-    ]
-
-    # 2a. Prefer video+audio formats with a known, suitable size and low resolution
-    suitable_video_known_size = [
-        f for f in all_video_formats
-        if get_filesize(f) and get_filesize(f) < max_size_mb * 1024 * 1024 and f.get("height", float("inf")) <= 480
-    ]
-    if suitable_video_known_size:
-        suitable_video_known_size.sort(key=lambda f: (f.get("height", 0) or 0, f.get("abr", 0) or 0), reverse=True)
-        selected = suitable_video_known_size[0]
-        print(
-            f"   ℹ️ No small audio-only format found. Falling back to video format with known size: {selected['format_id']} ({selected.get('height')}p, {round(get_filesize(selected) / (1024*1024), 2)}MB)"
-        )
-        return selected["format_id"]
-
-    # 2b. If none, take a chance on a low-resolution video+audio format with unknown size
+    # --- Candidate group C: Progressive low-res unknown size (last resort) ---
     video_unknown_size_low_res = [
         f for f in all_video_formats if not get_filesize(f) and f.get("height", float("inf")) <= 480
     ]
-    if video_unknown_size_low_res:
-        # Sort ascending by height to pick the SMALLEST resolution as a safer bet when size is unknown.
-        video_unknown_size_low_res.sort(key=lambda f: (f.get("height", 0) or 0, f.get("abr", 0) or 0))
-        selected = video_unknown_size_low_res[0]  # The first one is now the smallest
-        print(
-            f"   ℹ️ No small audio-only format found. Falling back to low-res video format with unknown size: {selected['format_id']} ({selected.get('height')}p)"
-        )
-        return selected["format_id"]
+    video_unknown_size_low_res.sort(key=lambda f: (f.get("height", 0) or 0, f.get("tbr", 0) or 0))
+    for f in video_unknown_size_low_res[:2]:
+        fmt = f.get("format_id")
+        if fmt and fmt not in candidates:
+            candidates.append(fmt)
 
-    # 3. If still nothing, return None to use the broad fallback.
-    return None
+    return candidates
 
 
 def is_video_unavailable_error(error_text: str) -> bool:
@@ -477,72 +490,83 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
         print("     - ⚠️ No format information found.")
         return None, "audio_download_failed"
 
-    # --- Step 2: Select the best format ---
-    selected_format_id = select_best_audio_format(info["formats"], max_size_mb=25)
-
-    format_selector = selected_format_id
-    if not format_selector:
-        print(
-            "     - ⚠️ No suitable small format found, falling back to 'bestaudio/best'. This might download a large file."
-        )
-        format_selector = "bestaudio/best"
+    # --- Step 2: Build ordered format candidates ---
+    format_candidates = select_download_format_candidates(info["formats"], max_size_mb=25)
+    if format_candidates:
+        print(f"     - ℹ️ Trying {len(format_candidates)} format candidate(s): {', '.join(format_candidates)}")
+    else:
+        print("     - ⚠️ No small format candidates found. Falling back to broad selector.")
+        format_candidates = ["best[acodec!=none][vcodec!=none][height<=480]/bestaudio/best"]
 
     # --- Step 3: Download the selected format and extract audio ---
-    ydl_opts = {
-        "format": format_selector,
-        "outtmpl": f"/tmp/{video_id}.%(ext)s",
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "max_filesize": 100 * 1024 * 1024,
-    }
-    ydl_opts.update(js_runtime_opts)
+    last_error_text = ""
+    for attempt_idx, format_selector in enumerate(format_candidates, start=1):
+        ydl_opts = {
+            "format": format_selector,
+            "outtmpl": f"/tmp/{video_id}.%(ext)s",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "max_filesize": 100 * 1024 * 1024,
+        }
+        ydl_opts.update(js_runtime_opts)
 
-    if has_ffmpeg:
-        ydl_opts["postprocessors"] = [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "m4a",
-                "preferredquality": "128",
-            }
-        ]
-    else:
-        print("     - ⚠️ FFmpeg not found. Skipping audio conversion. Downloading raw format.")
+        if has_ffmpeg:
+            ydl_opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                    "preferredquality": "128",
+                }
+            ]
+        else:
+            print("     - ⚠️ FFmpeg not found. Skipping audio conversion. Downloading raw format.")
 
-    if use_cookies and os.path.exists("cookies.txt"):
-        ydl_opts["cookiefile"] = "cookies.txt"
+        if use_cookies and os.path.exists("cookies.txt"):
+            ydl_opts["cookiefile"] = "cookies.txt"
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # extract_info with download=True returns the info dict *after* download/processing
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
-            
-            # If ffmpeg was used, we expect the .m4a file
-            if has_ffmpeg and os.path.exists(target_m4a_path):
-                print(f"     - ✅ Successfully downloaded and converted audio to {target_m4a_path}")
-                return target_m4a_path, None
-            
-            # If no ffmpeg, or conversion failed, find the actual downloaded file
-            if "requested_downloads" in info:
-                filepath = info["requested_downloads"][0]["filepath"]
-            else:
-                filepath = ydl.prepare_filename(info)
+        print(f"     - ℹ️ Download attempt {attempt_idx}/{len(format_candidates)} with format '{format_selector}'")
 
-            if os.path.exists(filepath):
-                print(f"     - ✅ Successfully downloaded audio (raw) to {filepath}")
-                return filepath, None
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # extract_info with download=True returns the info dict after processing
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
 
-            print(f"     - ⚠️ Download appeared to succeed, but file '{filepath}' was not found.")
-            return None, "audio_download_failed"
+                # If ffmpeg was used, we expect the .m4a file
+                if has_ffmpeg and os.path.exists(target_m4a_path):
+                    print(f"     - ✅ Successfully downloaded and converted audio to {target_m4a_path}")
+                    return target_m4a_path, None
 
-    except Exception as e:
-        error_text = str(e)
-        if is_video_unavailable_error(error_text):
-            print(f"     - ⚠️ Video unavailable: {e}")
-            return None, "video_unavailable"
-        print(f"     - ⚠️ Audio download failed: {e}")
-        return None, "audio_download_failed"
+                # If no ffmpeg, or conversion failed, find the actual downloaded file
+                if "requested_downloads" in info:
+                    filepath = info["requested_downloads"][0]["filepath"]
+                else:
+                    filepath = ydl.prepare_filename(info)
 
+                if os.path.exists(filepath):
+                    print(f"     - ✅ Successfully downloaded audio (raw) to {filepath}")
+                    return filepath, None
+
+                print(f"     - ⚠️ Download appeared to succeed, but file '{filepath}' was not found.")
+                last_error_text = "file_not_found_after_download"
+
+        except Exception as e:
+            error_text = str(e)
+            last_error_text = error_text
+            if is_video_unavailable_error(error_text):
+                print(f"     - ⚠️ Video unavailable: {e}")
+                return None, "video_unavailable"
+            print(f"     - ⚠️ Audio download failed for format '{format_selector}': {e}")
+
+        # Cleanup partial files before trying the next format candidate.
+        for path in glob.glob(f"/tmp/{video_id}*"):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    if last_error_text:
+        print(f"     - ⚠️ Exhausted all format candidates. Last error: {last_error_text}")
     return None, "audio_download_failed"
 
 
@@ -755,9 +779,9 @@ def ingest_single_video(
             return {
                 "status": "error",
                 "message": (
-                    "Audio download failed. This often happens when YouTube blocks the IP address (e.g. in Cloud Run). "
-                    "To fix this, either run the script from a residential IP or provide a 'cookies.txt' file "
-                    "exported from a logged-in browser session in the working directory."
+                    "Audio download failed after trying multiple format fallbacks. "
+                    "Likely causes: YouTube request restrictions (SABR/PO token), IP/network blocking, or stale cookies. "
+                    "Try updating yt-dlp, refreshing cookies.txt, and running from a different network."
                 ),
             }
         return {"status": "error", "message": f"AI analysis failed: {error}"}
@@ -851,7 +875,7 @@ def ingest_video_batch(
             if "Audio download failed" in msg:
                 consecutive_audio_failures += 1
                 if consecutive_audio_failures >= 3:
-                    log("   🛑 Aborting batch: 3 consecutive audio download failures (likely IP blocking or invalid cookies).")
+                    log("   🛑 Aborting batch: 3 consecutive audio download failures (likely network or YouTube format restrictions).")
                     summary["aborted"] = True
                     break
 
