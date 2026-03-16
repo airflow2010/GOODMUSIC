@@ -30,6 +30,7 @@ YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 APP_STATE_COLLECTION = "app_state"
 APP_STATE_DOC = "db_version"
 DEFAULT_GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+DOWNLOAD_MAX_FILESIZE_MB = 100
 
 # Centralized AI Model Configuration
 AI_MODEL_NAME = "gemini-3-flash-preview"
@@ -342,7 +343,30 @@ def get_video_metadata(youtube, video_id: str) -> tuple[str, str, datetime | Non
         return "", "", None
 
 
-def select_download_format_candidates(formats: list, max_size_mb: int = 25) -> List[str]:
+def is_hls_format(fmt: dict) -> bool:
+    return fmt.get("protocol") in {"m3u8", "m3u8_native"}
+
+
+def is_hls_only_non_live_fallback(info: dict) -> bool:
+    downloadable_formats = [
+        f
+        for f in info.get("formats", [])
+        if f.get("format_id")
+        and not str(f.get("format_id", "")).startswith("sb")
+        and (f.get("vcodec") != "none" or f.get("acodec") != "none")
+    ]
+    if not downloadable_formats:
+        return False
+    if info.get("is_live") or info.get("live_status") == "is_live":
+        return False
+    return all(is_hls_format(f) for f in downloadable_formats)
+
+
+def select_download_format_candidates(
+    formats: list,
+    max_size_mb: int = 25,
+    max_download_size_mb: int = DOWNLOAD_MAX_FILESIZE_MB,
+) -> List[str]:
     """
     Builds an ordered list of format selectors to try.
     We prefer small progressive formats first because some YouTube audio-only
@@ -354,12 +378,13 @@ def select_download_format_candidates(formats: list, max_size_mb: int = 25) -> L
         return f.get("filesize") or f.get("filesize_approx")
 
     max_bytes = max_size_mb * 1024 * 1024
+    max_download_bytes = max_download_size_mb * 1024 * 1024
 
     # --- Candidate group A: Progressive video+audio with known small size ---
     all_video_formats = [
         f
         for f in formats
-        if f.get("vcodec") != "none" and f.get("acodec") != "none"
+        if f.get("vcodec") != "none" and f.get("acodec") != "none" and not is_hls_format(f)
     ]
     progressive_known_size = [
         f for f in all_video_formats
@@ -376,15 +401,16 @@ def select_download_format_candidates(formats: list, max_size_mb: int = 25) -> L
         if fmt and fmt not in candidates:
             candidates.append(fmt)
 
-    # If no strict-small progressive format exists, allow a moderate overshoot.
-    progressive_near_limit = [
+    # If no strict-small progressive format exists, allow a larger progressive
+    # fallback up to the downloader's own max-filesize budget.
+    progressive_within_download_limit = [
         f for f in all_video_formats
-        if get_filesize(f) and get_filesize(f) < (max_bytes * 2) and f.get("height", float("inf")) <= 480
+        if get_filesize(f) and get_filesize(f) < max_download_bytes and f.get("height", float("inf")) <= 480
     ]
-    progressive_near_limit.sort(
+    progressive_within_download_limit.sort(
         key=lambda f: (get_filesize(f) or float("inf"), f.get("height", 0) or 0)
     )
-    for f in progressive_near_limit[:2]:
+    for f in progressive_within_download_limit[:3]:
         fmt = f.get("format_id")
         if fmt and fmt not in candidates:
             candidates.append(fmt)
@@ -394,7 +420,11 @@ def select_download_format_candidates(formats: list, max_size_mb: int = 25) -> L
     all_audio_formats = [
         f
         for f in formats
-        if (f.get("vcodec") == "none" or not f.get("vcodec")) and f.get("acodec") != "none"
+        if (
+            (f.get("vcodec") == "none" or not f.get("vcodec"))
+            and f.get("acodec") != "none"
+            and not is_hls_format(f)
+        )
     ]
 
     # 1) Audio-only with known small size
@@ -490,8 +520,17 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
         print("     - ⚠️ No format information found.")
         return None, "audio_download_failed"
 
+    if use_cookies and is_hls_only_non_live_fallback(info):
+        print("     - ⚠️ Authenticated extraction exposed only HLS fallback formats for a non-live video.")
+        print("     - ⚠️ Skipping HLS-only authenticated download path because it often produces empty files when YouTube challenge solving fails.")
+        return None, "auth_hls_only_formats"
+
     # --- Step 2: Build ordered format candidates ---
-    format_candidates = select_download_format_candidates(info["formats"], max_size_mb=25)
+    format_candidates = select_download_format_candidates(
+        info["formats"],
+        max_size_mb=25,
+        max_download_size_mb=DOWNLOAD_MAX_FILESIZE_MB,
+    )
     if format_candidates:
         print(f"     - ℹ️ Trying {len(format_candidates)} format candidate(s): {', '.join(format_candidates)}")
     else:
@@ -507,7 +546,7 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            "max_filesize": 100 * 1024 * 1024,
+            "max_filesize": DOWNLOAD_MAX_FILESIZE_MB * 1024 * 1024,
         }
         ydl_opts.update(js_runtime_opts)
 
@@ -605,6 +644,8 @@ def download_audio_for_analysis(video_id: str) -> tuple[Optional[str], Optional[
     print("   - Both un-authenticated and authenticated download attempts failed.")
     if "video_unavailable" in error_codes:
         return None, "video_unavailable"
+    if "auth_hls_only_formats" in error_codes:
+        return None, "auth_hls_only_formats"
     return None, "audio_download_failed"
 
 
@@ -782,6 +823,15 @@ def ingest_single_video(
                     "Audio download failed after trying multiple format fallbacks. "
                     "Likely causes: YouTube request restrictions (SABR/PO token), IP/network blocking, or stale cookies. "
                     "Try updating yt-dlp, refreshing cookies.txt, and running from a different network."
+                ),
+            }
+        if error == "auth_hls_only_formats":
+            return {
+                "status": "error",
+                "message": (
+                    "Authenticated extraction exposed only HLS fallback formats for this non-live video, "
+                    "which currently leads to empty downloads in this environment. "
+                    "Try refreshing cookies.txt and checking yt-dlp JS challenge solving/EJS support."
                 ),
             }
         return {"status": "error", "message": f"AI analysis failed: {error}"}
