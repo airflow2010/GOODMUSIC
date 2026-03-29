@@ -31,6 +31,7 @@ APP_STATE_COLLECTION = "app_state"
 APP_STATE_DOC = "db_version"
 DEFAULT_GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 DOWNLOAD_MAX_FILESIZE_MB = 100
+DOWNLOAD_LAST_RESORT_FILESIZE_MB = 400
 
 # Centralized AI Model Configuration
 AI_MODEL_NAME = "gemini-3-flash-preview"
@@ -369,54 +370,32 @@ def select_download_format_candidates(
 ) -> List[str]:
     """
     Builds an ordered list of format selectors to try.
-    We prefer small progressive formats first because some YouTube audio-only
-    formats (e.g. 140/251) may return HTTP 403 in current extractor conditions.
+    We prefer audio-only formats up to the real download budget to avoid pulling
+    oversized progressive video files for long uploads. Small progressive
+    formats remain as fallbacks when audio-only URLs are blocked.
     """
 
     def get_filesize(f):
         # filesize_approx is often available when filesize is not
         return f.get("filesize") or f.get("filesize_approx")
 
+    def add_candidates(source_formats: list, *, limit: int) -> None:
+        for f in source_formats[:limit]:
+            fmt = f.get("format_id")
+            if fmt and fmt not in candidates:
+                candidates.append(fmt)
+
     max_bytes = max_size_mb * 1024 * 1024
     max_download_bytes = max_download_size_mb * 1024 * 1024
 
-    # --- Candidate group A: Progressive video+audio with known small size ---
+    candidates: List[str] = []
+
     all_video_formats = [
         f
         for f in formats
         if f.get("vcodec") != "none" and f.get("acodec") != "none" and not is_hls_format(f)
     ]
-    progressive_known_size = [
-        f for f in all_video_formats
-        if get_filesize(f) and get_filesize(f) < max_bytes and f.get("height", float("inf")) <= 480
-    ]
-    progressive_known_size.sort(
-        key=lambda f: (f.get("height", 0) or 0, f.get("tbr", 0) or 0)
-    )
 
-    # Keep only the first few to avoid too many retries.
-    candidates: List[str] = []
-    for f in progressive_known_size[:4]:
-        fmt = f.get("format_id")
-        if fmt and fmt not in candidates:
-            candidates.append(fmt)
-
-    # If no strict-small progressive format exists, allow a larger progressive
-    # fallback up to the downloader's own max-filesize budget.
-    progressive_within_download_limit = [
-        f for f in all_video_formats
-        if get_filesize(f) and get_filesize(f) < max_download_bytes and f.get("height", float("inf")) <= 480
-    ]
-    progressive_within_download_limit.sort(
-        key=lambda f: (get_filesize(f) or float("inf"), f.get("height", 0) or 0)
-    )
-    for f in progressive_within_download_limit[:3]:
-        fmt = f.get("format_id")
-        if fmt and fmt not in candidates:
-            candidates.append(fmt)
-
-    # --- Candidate group B: Audio-only formats ---
-    # More robust check: vcodec is 'none' (or missing), and audio codec exists.
     all_audio_formats = [
         f
         for f in formats
@@ -427,35 +406,114 @@ def select_download_format_candidates(
         )
     ]
 
-    # 1) Audio-only with known small size
+    # 1) Audio-only formats within the actual download budget.
     suitable_audio_known_size = [
-        f for f in all_audio_formats if get_filesize(f) and get_filesize(f) < max_bytes
+        f for f in all_audio_formats if get_filesize(f) and get_filesize(f) < max_download_bytes
     ]
-    suitable_audio_known_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
-    for f in suitable_audio_known_size[:3]:
-        fmt = f.get("format_id")
-        if fmt and fmt not in candidates:
-            candidates.append(fmt)
+    suitable_audio_known_size.sort(
+        key=lambda f: (
+            0 if get_filesize(f) and get_filesize(f) < max_bytes else 1,
+            -(f.get("abr", 0) or 0),
+            get_filesize(f) or float("inf"),
+        )
+    )
+    add_candidates(suitable_audio_known_size, limit=4)
 
-    # 2) Audio-only unknown size
+    # 2) Audio-only unknown size as a later audio fallback.
     audio_unknown_size = [f for f in all_audio_formats if not get_filesize(f)]
     audio_unknown_size.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
-    for f in audio_unknown_size[:2]:
-        fmt = f.get("format_id")
-        if fmt and fmt not in candidates:
-            candidates.append(fmt)
+    add_candidates(audio_unknown_size, limit=2)
 
-    # --- Candidate group C: Progressive low-res unknown size (last resort) ---
+    # 3) Progressive video+audio with known small size.
+    progressive_known_size = [
+        f for f in all_video_formats
+        if get_filesize(f) and get_filesize(f) < max_bytes and f.get("height", float("inf")) <= 480
+    ]
+    progressive_known_size.sort(
+        key=lambda f: (get_filesize(f) or float("inf"), f.get("height", 0) or 0, f.get("tbr", 0) or 0)
+    )
+    add_candidates(progressive_known_size, limit=4)
+
+    # 4) Larger progressive fallbacks within the downloader budget.
+    progressive_within_download_limit = [
+        f for f in all_video_formats
+        if get_filesize(f) and get_filesize(f) < max_download_bytes and f.get("height", float("inf")) <= 480
+    ]
+    progressive_within_download_limit.sort(
+        key=lambda f: (get_filesize(f) or float("inf"), f.get("height", 0) or 0, f.get("tbr", 0) or 0)
+    )
+    add_candidates(progressive_within_download_limit, limit=3)
+
+    # 5) Progressive low-res unknown size (last resort before broad selectors).
     video_unknown_size_low_res = [
         f for f in all_video_formats if not get_filesize(f) and f.get("height", float("inf")) <= 480
     ]
-    video_unknown_size_low_res.sort(key=lambda f: (f.get("height", 0) or 0, f.get("tbr", 0) or 0))
-    for f in video_unknown_size_low_res[:2]:
+    video_unknown_size_low_res.sort(
+        key=lambda f: (f.get("height", 0) or 0, f.get("tbr", 0) or 0)
+    )
+    add_candidates(video_unknown_size_low_res, limit=2)
+
+    return candidates
+
+
+def select_large_progressive_last_resort_candidates(
+    formats: list,
+    min_size_mb: int = DOWNLOAD_MAX_FILESIZE_MB,
+    max_size_mb: int = DOWNLOAD_LAST_RESORT_FILESIZE_MB,
+) -> List[str]:
+    """Select low-res progressive formats above the normal budget as a last resort."""
+
+    def get_filesize(f):
+        return f.get("filesize") or f.get("filesize_approx")
+
+    min_bytes = min_size_mb * 1024 * 1024
+    max_bytes = max_size_mb * 1024 * 1024
+
+    candidates: List[str] = []
+    large_progressive_formats = [
+        f
+        for f in formats
+        if (
+            f.get("vcodec") != "none"
+            and f.get("acodec") != "none"
+            and not is_hls_format(f)
+            and f.get("height", float("inf")) <= 480
+            and get_filesize(f)
+            and min_bytes <= get_filesize(f) <= max_bytes
+        )
+    ]
+    large_progressive_formats.sort(
+        key=lambda f: (get_filesize(f) or float("inf"), f.get("height", 0) or 0, f.get("tbr", 0) or 0)
+    )
+    for f in large_progressive_formats[:2]:
         fmt = f.get("format_id")
         if fmt and fmt not in candidates:
             candidates.append(fmt)
 
     return candidates
+
+
+def has_oversized_progressive_fallback(
+    formats: list,
+    min_size_mb: int = DOWNLOAD_LAST_RESORT_FILESIZE_MB,
+) -> bool:
+    """Whether only even larger low-res progressive fallbacks remain beyond the last-resort budget."""
+
+    def get_filesize(f):
+        return f.get("filesize") or f.get("filesize_approx")
+
+    min_bytes = min_size_mb * 1024 * 1024
+    for f in formats:
+        if (
+            f.get("vcodec") != "none"
+            and f.get("acodec") != "none"
+            and not is_hls_format(f)
+            and f.get("height", float("inf")) <= 480
+            and get_filesize(f)
+            and get_filesize(f) > min_bytes
+        ):
+            return True
+    return False
 
 
 def is_video_unavailable_error(error_text: str) -> bool:
@@ -478,6 +536,48 @@ def is_video_unavailable_error(error_text: str) -> bool:
     if "contains content from" in lowered and "blocked" in lowered:
         return True
     return False
+
+
+def _resolve_downloaded_file_path(ydl, info: dict, video_id: str) -> Optional[str]:
+    """Best-effort resolution of the final downloaded file path from yt-dlp metadata."""
+    candidate_paths: List[str] = []
+
+    requested_downloads = info.get("requested_downloads")
+    if isinstance(requested_downloads, list):
+        for download in requested_downloads:
+            if not isinstance(download, dict):
+                continue
+            for key in ("filepath", "_filename"):
+                path = download.get(key)
+                if path and path not in candidate_paths:
+                    candidate_paths.append(path)
+
+    for key in ("filepath", "_filename"):
+        path = info.get(key)
+        if path and path not in candidate_paths:
+            candidate_paths.append(path)
+
+    try:
+        prepared_path = ydl.prepare_filename(info)
+    except Exception:
+        prepared_path = None
+    if prepared_path and prepared_path not in candidate_paths:
+        candidate_paths.append(prepared_path)
+
+    for path in candidate_paths:
+        if path and os.path.exists(path):
+            return path
+
+    matching_files = [
+        path
+        for path in glob.glob(f"/tmp/{video_id}*")
+        if os.path.isfile(path) and not path.endswith(".part")
+    ]
+    if matching_files:
+        matching_files.sort(key=os.path.getmtime, reverse=True)
+        return matching_files[0]
+
+    return candidate_paths[0] if candidate_paths else None
 
 
 def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], Optional[str]]:
@@ -531,22 +631,66 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
         max_size_mb=25,
         max_download_size_mb=DOWNLOAD_MAX_FILESIZE_MB,
     )
-    if format_candidates:
-        print(f"     - ℹ️ Trying {len(format_candidates)} format candidate(s): {', '.join(format_candidates)}")
+    large_progressive_last_resort = select_large_progressive_last_resort_candidates(
+        info["formats"],
+        min_size_mb=DOWNLOAD_MAX_FILESIZE_MB,
+        max_size_mb=DOWNLOAD_LAST_RESORT_FILESIZE_MB,
+    )
+    oversized_progressive_exists = has_oversized_progressive_fallback(
+        info["formats"],
+        min_size_mb=DOWNLOAD_LAST_RESORT_FILESIZE_MB,
+    )
+
+    attempt_plan: List[tuple[str, int]] = [
+        (format_selector, DOWNLOAD_MAX_FILESIZE_MB) for format_selector in format_candidates
+    ]
+
+    if large_progressive_last_resort:
+        for format_selector in large_progressive_last_resort:
+            if format_selector not in format_candidates:
+                attempt_plan.append((format_selector, DOWNLOAD_LAST_RESORT_FILESIZE_MB))
+
+    if attempt_plan:
+        print(
+            "     - ℹ️ Trying "
+            f"{len(attempt_plan)} format candidate(s): "
+            f"{', '.join(format_selector for format_selector, _ in attempt_plan)}"
+        )
+        if large_progressive_last_resort:
+            print(
+                "     - ℹ️ Large progressive last-resort candidates will only be tried "
+                "after audio-only/standard candidates fail."
+            )
     else:
-        print("     - ⚠️ No small format candidates found. Falling back to broad selector.")
-        format_candidates = ["best[acodec!=none][vcodec!=none][height<=480]/bestaudio/best"]
+        print("     - ⚠️ No preferred format candidates found. Falling back to broad selectors.")
+        attempt_plan = [
+            (f"bestaudio[filesize<{DOWNLOAD_MAX_FILESIZE_MB}M]/bestaudio", DOWNLOAD_MAX_FILESIZE_MB),
+            (
+                (
+                    f"best[acodec!=none][vcodec!=none][height<=480][filesize<{DOWNLOAD_MAX_FILESIZE_MB}M]"
+                    "/best[acodec!=none][vcodec!=none][height<=480]"
+                ),
+                DOWNLOAD_MAX_FILESIZE_MB,
+            ),
+            (
+                (
+                    f"best[acodec!=none][vcodec!=none][height<=480][filesize<{DOWNLOAD_LAST_RESORT_FILESIZE_MB}M]"
+                    "/best[acodec!=none][vcodec!=none][height<=480]"
+                ),
+                DOWNLOAD_LAST_RESORT_FILESIZE_MB,
+            ),
+        ]
 
     # --- Step 3: Download the selected format and extract audio ---
     last_error_text = ""
-    for attempt_idx, format_selector in enumerate(format_candidates, start=1):
+    for attempt_idx, (format_selector, max_filesize_mb) in enumerate(attempt_plan, start=1):
         ydl_opts = {
             "format": format_selector,
             "outtmpl": f"/tmp/{video_id}.%(ext)s",
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            "max_filesize": DOWNLOAD_MAX_FILESIZE_MB * 1024 * 1024,
+            "max_filesize": max_filesize_mb * 1024 * 1024,
         }
         ydl_opts.update(js_runtime_opts)
 
@@ -564,7 +708,14 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
         if use_cookies and os.path.exists("cookies.txt"):
             ydl_opts["cookiefile"] = "cookies.txt"
 
-        print(f"     - ℹ️ Download attempt {attempt_idx}/{len(format_candidates)} with format '{format_selector}'")
+        size_note = ""
+        if max_filesize_mb != DOWNLOAD_MAX_FILESIZE_MB:
+            size_note = f" (max {max_filesize_mb} MB, last resort)"
+
+        print(
+            f"     - ℹ️ Download attempt {attempt_idx}/{len(attempt_plan)} "
+            f"with format '{format_selector}'{size_note}"
+        )
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -577,16 +728,16 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
                     return target_m4a_path, None
 
                 # If no ffmpeg, or conversion failed, find the actual downloaded file
-                if "requested_downloads" in info:
-                    filepath = info["requested_downloads"][0]["filepath"]
-                else:
-                    filepath = ydl.prepare_filename(info)
+                filepath = _resolve_downloaded_file_path(ydl, info, video_id)
 
-                if os.path.exists(filepath):
+                if filepath and os.path.exists(filepath):
                     print(f"     - ✅ Successfully downloaded audio (raw) to {filepath}")
                     return filepath, None
 
-                print(f"     - ⚠️ Download appeared to succeed, but file '{filepath}' was not found.")
+                if filepath:
+                    print(f"     - ⚠️ Download appeared to succeed, but file '{filepath}' was not found.")
+                else:
+                    print("     - ⚠️ Download appeared to succeed, but yt-dlp did not expose a usable output path.")
                 last_error_text = "file_not_found_after_download"
 
         except Exception as e:
@@ -606,6 +757,12 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
 
     if last_error_text:
         print(f"     - ⚠️ Exhausted all format candidates. Last error: {last_error_text}")
+    if oversized_progressive_exists:
+        print(
+            "     - ⚠️ Audio-only downloads failed, and the remaining progressive fallback formats "
+            f"exceed the configured last-resort size limit of {DOWNLOAD_LAST_RESORT_FILESIZE_MB} MB."
+        )
+        return None, "progressive_fallback_too_large"
     return None, "audio_download_failed"
 
 
@@ -823,6 +980,16 @@ def ingest_single_video(
                     "Audio download failed after trying multiple format fallbacks. "
                     "Likely causes: YouTube request restrictions (SABR/PO token), IP/network blocking, or stale cookies. "
                     "Try updating yt-dlp, refreshing cookies.txt, and running from a different network."
+                ),
+            }
+        if error == "progressive_fallback_too_large":
+            return {
+                "status": "error",
+                "message": (
+                    "Audio-only formats could not be downloaded, and the remaining progressive fallback "
+                    f"formats exceed the configured size limit of {DOWNLOAD_LAST_RESORT_FILESIZE_MB} MB. "
+                    "Increase the last-resort limit if you want to allow very large low-resolution video downloads "
+                    "for audio extraction."
                 ),
             }
         if error == "auth_hls_only_formats":
