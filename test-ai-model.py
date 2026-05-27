@@ -34,9 +34,7 @@ CLIENT_SECRETS_FILE = "client_secret.json"
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 AI_MODELS = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gemini-3.5-flash",
     "gemini-3-flash-preview",
     "gemini-3-pro-preview",
 ]
