@@ -36,6 +36,7 @@ YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 AI_MODELS = [
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview",
 ]
 
 ERROR_REMARK_PREFIXES = (
