@@ -36,8 +36,13 @@ YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 AI_MODELS = [
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
-    "gemini-3-pro-preview",
 ]
+
+ERROR_REMARK_PREFIXES = (
+    "API Error:",
+    "Processing Error:",
+    "Audio read error:",
+)
 
 # ---------------------------------------------------------------------------
 #  DATA MODELS (Structured Output Schema)
@@ -218,21 +223,39 @@ def predict_genre(client: genai.Client, model_name: str, video_id: Optional[str]
                 if getattr(part, 'thought', False):
                      thoughts_text += f"[Internal Thought]: {part.text}\n"
 
-        # 5. Parse JSON (Now strictly guaranteed by Schema)
-        # Using built-in SDK parsing to Pydantic object if available, or standard JSON load
-        # response.parsed is available in newer SDKs when schema is used, but manual load is safer across versions
-        text = response.text.strip()
+        # 5. Parse JSON. Prefer SDK parsed output when available, and fall
+        # back to the non-thought response text for models that include
+        # thinking parts.
+        parsed_response = getattr(response, "parsed", None)
+        if isinstance(parsed_response, MusicAnalysis):
+            analysis = parsed_response
+        elif isinstance(parsed_response, dict):
+            analysis = MusicAnalysis(**parsed_response)
+        else:
+            text = (response.text or "").strip()
+            if not text and response.candidates and response.candidates[0].content.parts:
+                text = "".join(
+                    part.text or ""
+                    for part in response.candidates[0].content.parts
+                    if not getattr(part, "thought", False)
+                ).strip()
+
+            if not text:
+                finish_reason = None
+                if response.candidates:
+                    finish_reason = getattr(response.candidates[0], "finish_reason", None)
+                return "Unknown", 0, f"Processing Error: empty response text (finish_reason={finish_reason})", "", ""
         
-        # Clean markdown code blocks just in case (though schema usually prevents them)
-        if text.startswith("```json"):
-            text = text.replace("```json", "").replace("```", "").strip()
-        elif text.startswith("```"):
-            text = text.replace("```", "").strip()
-            
-        parsed_dict = json.loads(text)
-        
-        # Verify it matches our Pydantic model (extra validation layer)
-        analysis = MusicAnalysis(**parsed_dict)
+            # Clean markdown code blocks just in case (though schema usually prevents them)
+            if text.startswith("```json"):
+                text = text.replace("```json", "").replace("```", "").strip()
+            elif text.startswith("```"):
+                text = text.replace("```", "").strip()
+
+            parsed_dict = json.loads(text)
+
+            # Verify it matches our Pydantic model (extra validation layer)
+            analysis = MusicAnalysis(**parsed_dict)
 
         genre = analysis.genre
         # Post-process genre to ensure it's in our allowed list
@@ -272,7 +295,7 @@ def run_prediction_task(task_args):
     try:
         genre, fidelity, remarks, artist, track = predict_genre(client, model_name, vid_arg, title_arg, desc_arg, audio_arg)
         duration = time.time() - start_time
-        
+
         result = {
             "model": model_name,
             "scenario": scenario_name,
@@ -283,6 +306,12 @@ def run_prediction_task(task_args):
             "track": track,
             "duration": f"{duration:.2f}s"
         }
+
+        if remarks.startswith(ERROR_REMARK_PREFIXES):
+            result["error"] = remarks
+            print(f"   ❌ FAILED: {model_name} ({scenario_name}) in {duration:.2f}s. Error: {remarks}")
+            return result
+
         print(f"   ✅ Finished: {model_name} ({scenario_name}) in {duration:.2f}s -> (Genre: {genre}, Artist: {artist})")
         return result
     except Exception as e:
@@ -426,9 +455,25 @@ def main():
         row_str = f"{model_name:<25}"
         for s in [x[0] for x in scenarios]:
             res = next((r for r in results if r["model"] == model_name and r.get("scenario") == s), None)
-            val = res.get("genre", "Unknown") if res and "error" not in res else "-"
+            if not res:
+                val = "-"
+            elif "error" in res:
+                val = "ERROR"
+            else:
+                val = res.get("genre", "Unknown")
             row_str += f" | {val:<22}"
         print(row_str)
+
+    error_results = [r for r in results if "error" in r]
+    if error_results:
+        print("\n" + "=" * 100)
+        print(f"{'ERROR DETAILS':^100}")
+        print("-" * 100)
+        for res in sorted(error_results, key=lambda r: (r.get("model", ""), r.get("scenario", ""))):
+            print(
+                f"{res.get('model')} ({res.get('scenario')}, {res.get('duration', 'n/a')}): "
+                f"{res.get('error')}"
+            )
 
 if __name__ == "__main__":
     main()
