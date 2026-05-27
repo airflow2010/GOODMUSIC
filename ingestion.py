@@ -1048,6 +1048,7 @@ def ingest_video_batch(
     max_new_entries: int = 0,
     sleep_between: float = 0.0,
     progress_logger: Optional[Callable[[str], None]] = None,
+    audio_failure_continue_prompt: Optional[Callable[[str], bool]] = None,
 ):
     """Batch-ingest a list of video IDs; returns summary counts."""
     summary = {"added": 0, "exists": 0, "unavailable": 0, "errors": 0, "aborted": False}
@@ -1092,6 +1093,15 @@ def ingest_video_batch(
 
             if "Audio download failed" in msg:
                 consecutive_audio_failures += 1
+                if audio_failure_continue_prompt:
+                    if audio_failure_continue_prompt(vid):
+                        consecutive_audio_failures = 0
+                        continue
+
+                    log("   🛑 Aborting batch: user chose not to continue after audio download failure.")
+                    summary["aborted"] = True
+                    break
+
                 if consecutive_audio_failures >= 3:
                     log("   🛑 Aborting batch: 3 consecutive audio download failures (likely network or YouTube format restrictions).")
                     summary["aborted"] = True

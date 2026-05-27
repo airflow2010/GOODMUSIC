@@ -7,7 +7,7 @@ import re
 import time
 import sys
 import textwrap
-from typing import List, Tuple
+from typing import Callable, List, Optional, Tuple
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 
@@ -145,6 +145,28 @@ def warn_if_cookies_missing_or_invalid() -> None:
         print("   Certain videos (e.g. age-restricted) may not be digested without valid cookies.")
         print("   You may need to refresh cookies or verify the account.")
         confirm_proceed_without_valid_cookies()
+
+def get_audio_failure_continue_prompt() -> Optional[Callable[[str], bool]]:
+    """Return an interactive prompt callback when stdin is available."""
+    if not sys.stdin.isatty():
+        return None
+
+    def prompt(video_id: str) -> bool:
+        while True:
+            try:
+                resp = input(
+                    f"Audio download failed for {video_id}. Continue with the next video? (y/n) "
+                ).strip().lower()
+            except EOFError:
+                print("\n❌ No input available. Aborting.")
+                return False
+            if resp in ("y", "yes"):
+                return True
+            if resp in ("n", "no"):
+                return False
+            print("Please enter 'y' or 'n'.")
+
+    return prompt
 
 class MusicMention(BaseModel):
     artist: str = Field(description="Artist name (required).")
@@ -309,7 +331,16 @@ def extract_substack_date_from_html(html_text: str) -> datetime | None:
             return dt
     return None
 
-def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, max_new_entries: int = 0, model_name: str = "unknown") -> Tuple[int, bool]:
+def process_post_to_firestore(
+    db,
+    model,
+    youtube,
+    post: dict,
+    html_text: str,
+    max_new_entries: int = 0,
+    model_name: str = "unknown",
+    audio_failure_continue_prompt: Optional[Callable[[str], bool]] = None,
+) -> Tuple[int, bool]:
     _, video_ids = extract_from_html_text(html_text)
     if not video_ids:
         return 0, False
@@ -330,6 +361,7 @@ def process_post_to_firestore(db, model, youtube, post: dict, html_text: str, ma
         max_new_entries=max_new_entries,
         sleep_between=0.5,
         progress_logger=lambda msg: print(msg),
+        audio_failure_continue_prompt=audio_failure_continue_prompt,
     )
 
     print()
@@ -799,6 +831,7 @@ def run_substack_import(args, db, model, youtube) -> None:
 
     print(f"🔄 Processing {len(posts)} posts...")
     total_new_entries = 0
+    audio_failure_continue_prompt = get_audio_failure_continue_prompt()
     for i, post in enumerate(posts):
         if args.limit_new_db_entries > 0 and total_new_entries >= args.limit_new_db_entries:
             print(f"🛑 Limit of {args.limit_new_db_entries} new DB entries reached.")
@@ -819,6 +852,7 @@ def run_substack_import(args, db, model, youtube) -> None:
             html_text,
             max_new_entries=remaining_limit,
             model_name=AI_MODEL_NAME,
+            audio_failure_continue_prompt=audio_failure_continue_prompt,
         )
 
         if aborted:
@@ -860,6 +894,7 @@ def run_playlist_import(args, db, model, youtube) -> None:
         max_new_entries=args.limit_new_db_entries,
         sleep_between=0.5,
         progress_logger=lambda msg: print(msg),
+        audio_failure_continue_prompt=get_audio_failure_continue_prompt(),
     )
     print(
         f"\nSummary: {summary['added']} added, {summary['exists']} existing, "
@@ -883,6 +918,7 @@ def run_video_ids_import(args, db, model, youtube) -> None:
         max_new_entries=args.limit_new_db_entries,
         sleep_between=0.5,
         progress_logger=lambda msg: print(msg),
+        audio_failure_continue_prompt=get_audio_failure_continue_prompt(),
     )
     print(
         f"\nSummary: {summary['added']} added, {summary['exists']} existing, "
@@ -1018,6 +1054,7 @@ def run_url_scan(args, db, model, youtube) -> None:
         max_new_entries=args.limit_new_db_entries,
         sleep_between=0.5,
         progress_logger=lambda msg: print(msg),
+        audio_failure_continue_prompt=get_audio_failure_continue_prompt(),
     )
     print(
         f"\nSummary: {summary['added']} added, {summary['exists']} existing, "
