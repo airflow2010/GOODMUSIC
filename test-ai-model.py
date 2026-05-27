@@ -297,14 +297,32 @@ def run_prediction_task(task_args):
 #  MAIN LOOP
 # ---------------------------------------------------------------------------
 
-def main():
+def _looks_like_youtube_id(value: str) -> bool:
+    return len(value) == 11 and all(ch.isalnum() or ch in "_-" for ch in value)
+
+
+def parse_args():
     parser = argparse.ArgumentParser(description="Test AI models for music genre categorization.")
-    parser.add_argument("video_id", help="YouTube Video ID")
+    parser.add_argument("video_id", nargs="?", help="YouTube Video ID")
     parser.add_argument("--project", default="goodmusic-470520", help="Google Cloud Project ID")
     # --- ADDED: Arg for secret name ---
     parser.add_argument("--secret_name", default="GEMINI_API_KEY", help="Name of the secret in Secret Manager")
     parser.add_argument("--location", default="global", help="Vertex AI Location") # Kept to avoid breaking existing args, though unused for AI Studio
-    args = parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+
+    if not args.video_id and len(unknown_args) == 1 and _looks_like_youtube_id(unknown_args[0]):
+        args.video_id = unknown_args[0]
+    elif unknown_args:
+        parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
+
+    if not args.video_id:
+        parser.error("the following arguments are required: video_id")
+
+    return args
+
+
+def main():
+    args = parse_args()
 
     print(f"🚀 Testing AI Models for Video ID: {args.video_id}")
     print(f"   Project: {args.project}")
