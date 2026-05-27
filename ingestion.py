@@ -30,8 +30,8 @@ YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
 APP_STATE_COLLECTION = "app_state"
 APP_STATE_DOC = "db_version"
 DEFAULT_GCP_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-DOWNLOAD_MAX_FILESIZE_MB = 100
-DOWNLOAD_LAST_RESORT_FILESIZE_MB = 400
+DOWNLOAD_MAX_FILESIZE_MB = int(os.environ.get("DOWNLOAD_MAX_FILESIZE_MB", 100))
+DOWNLOAD_LAST_RESORT_FILESIZE_MB = int(os.environ.get("DOWNLOAD_LAST_RESORT_FILESIZE_MB", 400))
 
 # Centralized AI Model Configuration
 AI_MODEL_NAME = "gemini-3-flash-preview"
@@ -385,8 +385,8 @@ def select_download_format_candidates(
             if fmt and fmt not in candidates:
                 candidates.append(fmt)
 
-    max_bytes = max_size_mb * 1024 * 1024
-    max_download_bytes = max_download_size_mb * 1024 * 1024
+    max_bytes = max_size_mb * 1024 * 1024 if max_size_mb > 0 else float('inf')
+    max_download_bytes = max_download_size_mb * 1024 * 1024 if max_download_size_mb > 0 else float('inf')
 
     candidates: List[str] = []
 
@@ -467,7 +467,7 @@ def select_large_progressive_last_resort_candidates(
         return f.get("filesize") or f.get("filesize_approx")
 
     min_bytes = min_size_mb * 1024 * 1024
-    max_bytes = max_size_mb * 1024 * 1024
+    max_bytes = max_size_mb * 1024 * 1024 if max_size_mb > 0 else float('inf')
 
     candidates: List[str] = []
     large_progressive_formats = [
@@ -690,8 +690,9 @@ def _attempt_download(video_id: str, use_cookies: bool) -> tuple[Optional[str], 
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            "max_filesize": max_filesize_mb * 1024 * 1024,
         }
+        if max_filesize_mb > 0:
+            ydl_opts["max_filesize"] = max_filesize_mb * 1024 * 1024
         ydl_opts.update(js_runtime_opts)
 
         if has_ffmpeg:

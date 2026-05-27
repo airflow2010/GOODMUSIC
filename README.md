@@ -128,6 +128,8 @@ ADMIN_USER="<admin-email>"
 ADMIN_PASSWORD="<password>"
 GEMINI_API_KEY="<api-key>"
 FLASK_SECRET_KEY="<random-stable-secret>"
+DOWNLOAD_MAX_FILESIZE_MB="0"
+DOWNLOAD_LAST_RESORT_FILESIZE_MB="0"
 ```
 
 Also, for creating local Application Default Credentials (ADC), set your default project and run:
