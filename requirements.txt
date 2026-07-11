@@ -19,5 +19,5 @@ Authlib
 
 # Utilities
 python-dotenv
-yt-dlp
+yt-dlp[default]
 pydantic
